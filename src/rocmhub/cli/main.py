@@ -1,10 +1,16 @@
 """Main entrypoint for the rocmhub CLI."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 from typing import List, Optional
 
 from rocmhub import __version__
+from rocmhub.core.errors import ROCmHubError
+from rocmhub.core.types import ModelSpec
+from rocmhub.models.huggingface import HuggingFaceModelSource
+from rocmhub.models.inspector import ModelInspector
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,9 +47,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_parser.add_argument(
         "model_id",
-        nargs="?",
-        default=None,
         help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    inspect_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    inspect_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ModelSpec as pure JSON on stdout.",
     )
 
     # Command: run
@@ -71,6 +85,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _format_model_spec(spec: ModelSpec) -> str:
+    """Format ModelSpec into a readable summary table."""
+    params_str = "None"
+    if spec.parameter_count is not None:
+        if spec.parameter_count >= 1_000_000_000:
+            params_str = f"{spec.parameter_count:,} (~{spec.parameter_count / 1_000_000_000:.1f}B)"
+        elif spec.parameter_count >= 1_000_000:
+            params_str = f"{spec.parameter_count:,} (~{spec.parameter_count / 1_000_000:.1f}M)"
+        else:
+            params_str = f"{spec.parameter_count:,}"
+
+    ctx_str = f"{spec.context_length:,}" if spec.context_length is not None else "None"
+    dtype_str = spec.default_dtype or "None"
+    arch_str = spec.architecture or "None"
+    weights_str = spec.weights_format or "unknown"
+
+    lines = [
+        f"{'Model:':<22} {spec.model_id}",
+        f"{'Requested revision:':<22} {spec.requested_revision}",
+        f"{'Resolved commit SHA:':<22} {spec.commit_sha}",
+        f"{'Architecture:':<22} {arch_str}",
+        f"{'Parameter count:':<22} {params_str}",
+        f"{'Context length:':<22} {ctx_str}",
+        f"{'Default dtype:':<22} {dtype_str}",
+        f"{'Weights format:':<22} {weights_str}",
+    ]
+    return "\n".join(lines)
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """CLI execution entrypoint."""
     parser = build_parser()
@@ -87,10 +130,24 @@ def main(args: Optional[List[str]] = None) -> int:
         return 1
 
     if parsed_args.command == "inspect":
-        sys.stderr.write(
-            "rocmhub inspect: NOT_IMPLEMENTED (Scheduled for Phase 4: Model Source & Inspection)\n"
-        )
-        return 1
+        try:
+            source = HuggingFaceModelSource()
+            inspector = ModelInspector(source=source)
+            spec = inspector.inspect(
+                model_id=parsed_args.model_id,
+                revision=parsed_args.revision,
+            )
+            if parsed_args.json:
+                sys.stdout.write(spec.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_model_spec(spec) + "\n")
+            return 0
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error: {exc}\n")
+            return 1
 
     if parsed_args.command == "run":
         sys.stderr.write(

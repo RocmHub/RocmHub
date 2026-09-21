@@ -73,15 +73,21 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Captures driver versions, Linux kernel, ROCm paths, and override variables (`HSA_OVERRIDE_GFX_VERSION`).
 - **Verification**: Unit tests on mock detector + real detection test asserting correct field structure.
 
-### Phase 4: Model Source & Inspection
-- [ ] Implement `rocmhub/models/source.py`:
-  - Resolves model from Hugging Face Hub.
-  - Caches files and resolves immutable commit hash (commit SHA).
-- [ ] Implement `rocmhub/models/inspector.py`:
-  - Parses `config.json` without loading weights into RAM/VRAM.
-  - Calculates parameter count from `model.safetensors.index.json` or single `safetensors` headers.
-  - Identifies attention type (GQA/MHA), vocabulary size, hidden size, context length.
-- **Verification**: Test model inspector against `Qwen/Qwen2.5-0.5B-Instruct` configuration.
+### Phase 4: Model Source & Inspection (COMPLETED)
+- [x] Implement `rocmhub/models/base.py`:
+  - `ModelSource` protocol (`source_name`, `resolve_revision`, `get_repository_metadata`, `fetch_metadata_file`).
+  - `RepositoryMetadata` dataclass.
+- [x] Implement `rocmhub/models/huggingface.py`:
+  - `HuggingFaceModelSource` adapter using `huggingface_hub` without executing remote code.
+  - Resolves revisions to immutable 40-character Git commit SHAs.
+  - Translates Hub-specific exceptions on the boundary (`ModelNotFoundError`, `AuthRequiredError`, `RevisionNotFoundError`, `NetworkError`).
+- [x] Implement `rocmhub/models/inspector.py`:
+  - Statically parses `config.json` without downloading or loading weight tensors.
+  - Safe parameter count discovery from Hub-level safetensors metadata / index (`None` if indeterminable).
+  - Extracts architecture, context length, default precision (`torch_dtype`), and weights format (`safetensors`, `pytorch_bin`, `gguf`, `unknown`).
+  - Enforces `trust_remote_code=False` with `RemoteCodeRequiredError`.
+- [x] CLI command: `rocmhub inspect <model_id> [--revision <rev>] [--json]`.
+- **Verification**: Complete offline unit test suite (`tests/test_models.py`, `tests/test_cli.py`) + live network integration test (`tests/test_integration_hf.py`).
 
 ### Phase 5: Baseline Runner Adapter
 - [ ] Implement `rocmhub/runners/base.py`:

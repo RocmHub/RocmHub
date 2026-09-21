@@ -66,12 +66,21 @@ rocmhub/
 ```
 
 ### 3.1 `rocmhub.models`
-- **`ModelSource`**: Resolves model references (e.g., `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`), checks remote revisions, resolves immutable Git commit SHA, downloads/caches weights, and provides local filesystem paths.
-- **`ModelInspector`**: Reads model configuration files (`config.json`, tokenizer configs) without loading all weights into memory when possible. Extracts:
-  - Architecture family (e.g., `LlamaForCausalLM`, `Qwen2ForCausalLM`).
-  - Total parameter count (derived from weight index or safetensors header).
-  - Attention configuration (MHA, GQA, num_heads, num_kv_heads, head_dim).
-  - Max context length and default floating-point precision.
+- **`ModelSource` (Protocol)**: Abstract interface decoupling the core from specific model registries:
+  - `source_name: str`: Identifier (e.g. `"huggingface"`).
+  - `resolve_revision(model_id, revision) -> str`: Resolves requested revision (branch/tag/SHA) into an immutable 40-character Git commit SHA.
+  - `get_repository_metadata(model_id, revision) -> RepositoryMetadata`: Obtains file listings and hub-level metadata without downloading tensor binaries.
+  - `fetch_metadata_file(model_id, filename, revision) -> Optional[str]`: Fetches lightweight JSON/text configs.
+- **`HuggingFaceModelSource`**: Adapter using `huggingface_hub`:
+  - Enforces `trust_remote_code=False` at all times (no remote code execution).
+  - Translates Hub-specific exceptions on the adapter boundary into domain exceptions (`ModelNotFoundError`, `AuthRequiredError`, `RevisionNotFoundError`, `NetworkError`).
+  - Utilizes standard Hugging Face local cache (`~/.cache/huggingface/hub`).
+- **`ModelInspector`**: Static analysis engine constructing validated `ModelSpec`:
+  - Safely extracts `architecture` without loading weights into RAM/VRAM.
+  - Detects `weights_format` (`safetensors`, `pytorch_bin`, `gguf`, `unknown`).
+  - Discovers `parameter_count` from server-side safetensors metadata or index metadata without guessing (`None` if indeterminable).
+  - Extracts `context_length` from standard config fields (`max_position_embeddings`, `seq_length`, etc.).
+  - Rejects untrusted remote code with `RemoteCodeRequiredError` if architecture resolution requires executing repository scripts.
 
 ### 3.2 `rocmhub.hardware`
 - **`HardwareDetector`**: Queries hardware capabilities dynamically:

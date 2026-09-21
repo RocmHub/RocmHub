@@ -5,8 +5,11 @@ Marked as 'network' and 'integration' so that offline unit test runs exclude it.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from rocmhub.cli.main import main
 from rocmhub.core.types import ModelSpec
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
@@ -81,4 +84,26 @@ def test_live_check_qwen_model_on_current_mac(capsys: pytest.CaptureFixture[str]
     reason_codes = [r["code"] for r in report_dict["reasons"]]
     assert "NO_AMD_GPU" in reason_codes
     assert "ROCM_NOT_DETECTED" in reason_codes
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_run_qwen_model_on_current_mac_stops_at_preflight(capsys: pytest.CaptureFixture[str]) -> None:
+    """Live integration test: rocmhub run stops at preflight on Mac without downloading weights."""
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    exit_code = main(["run", model_id, "--prompt", "Hello", "--max-new-tokens", "8", "--json"])
+
+    # Must exit with code 2 (NO_ACCELERATOR)
+    assert exit_code == 2
+
+    captured = capsys.readouterr()
+    run_dict = json.loads(captured.out)
+
+    assert run_dict["status"] == "SKIPPED"
+    assert run_dict["model_id"] == model_id
+    assert run_dict["generated_text"] is None
+    assert run_dict["input_tokens"] is None
+    assert run_dict["generated_tokens"] is None
+    assert "NO_ACCELERATOR" in run_dict["error"]
+
 

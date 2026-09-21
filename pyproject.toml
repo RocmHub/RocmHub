@@ -72,3 +72,12 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
 packages = ["rocmhub"]
+
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "torch",
+    "transformers.*",
+    "transformers",
+]
+ignore_missing_imports = true

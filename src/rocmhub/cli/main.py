@@ -13,11 +13,14 @@ from rocmhub.core.types import (
     CapabilityReport,
     DetectionReport,
     EvaluationVerdict,
+    ExecutionStatus,
     ModelSpec,
+    RunResult,
 )
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
+from rocmhub.runners import HuggingFaceRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,23 +93,52 @@ def build_parser() -> argparse.ArgumentParser:
     # Command: run
     run_parser = subparsers.add_parser(
         "run",
-        help="Execute model baseline and run benchmark pipeline.",
+        help="Execute model baseline inference on target AMD GPU.",
+    )
+    run_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
     )
     run_parser.add_argument(
         "--model",
+        dest="model_opt",
         required=False,
-        help="Model ID to execute.",
+        help="Alternative flag for model ID.",
+    )
+    run_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    run_parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="Target accelerator device index (default: 0).",
     )
     run_parser.add_argument(
         "--precision",
         default="fp16",
         choices=["fp16", "bf16", "fp32"],
-        help="Model inference precision.",
+        help="Inference precision (default: 'fp16').",
     )
     run_parser.add_argument(
-        "--output-dir",
-        default="artifacts",
-        help="Directory to save generated artifact manifest.",
+        "--prompt",
+        default="Hello, what are you?",
+        help="Input text prompt for inference.",
+    )
+    run_parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=16,
+        help="Maximum tokens to generate (default: 16).",
+    )
+    run_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output RunResult as pure JSON on stdout.",
     )
 
     return parser
@@ -233,6 +265,32 @@ def _format_capability_report(report: CapabilityReport) -> str:
     return "\n".join(lines)
 
 
+def _format_run_result(result: RunResult) -> str:
+    """Format RunResult into a clean human-readable summary table."""
+    lines: List[str] = []
+    lines.append("Model:")
+    lines.append(f"  {result.model_id} (commit: {result.model_revision[:8]}...)")
+    lines.append("")
+    lines.append("Runtime:")
+    dev_str = f"cuda:{result.device_id}" if result.device_id is not None else "None"
+    lines.append(f"  {result.runtime_name} (device: {dev_str}, precision: {result.precision})")
+    lines.append("")
+    lines.append("Prompt:")
+    lines.append(f"  {result.prompt}")
+    lines.append("")
+    lines.append("Generated Text:")
+    lines.append(f"  {result.generated_text or '<none>'}")
+    lines.append("")
+    lines.append("Token Statistics:")
+    lines.append(f"  Input tokens:     {result.input_tokens if result.input_tokens is not None else 'None'}")
+    lines.append(f"  Generated tokens: {result.generated_tokens if result.generated_tokens is not None else 'None'}")
+    lines.append("")
+    lines.append(f"Status: {result.status.value}")
+    if result.error:
+        lines.append(f"Error:  {result.error}")
+    return "\n".join(lines)
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """CLI execution entrypoint."""
     parser = build_parser()
@@ -311,10 +369,93 @@ def main(args: Optional[List[str]] = None) -> int:
             return 1
 
     if parsed_args.command == "run":
-        sys.stderr.write(
-            "rocmhub run: NOT_IMPLEMENTED (Scheduled for Phase 5-8: Runner, Benchmark, and Artifact Pipeline)\n"
-        )
-        return 1
+        target_model_id = parsed_args.model_id or parsed_args.model_opt
+        if not target_model_id:
+            sys.stderr.write("Error: model_id must be provided to 'rocmhub run'.\n")
+            return 1
+
+        try:
+            # 1. Inspect model metadata (resolves immutable commit SHA, no weights downloaded)
+            source = HuggingFaceModelSource()
+            inspector = ModelInspector(source=source)
+            model_spec = inspector.inspect(
+                model_id=target_model_id,
+                revision=parsed_args.revision,
+            )
+
+            # 2. Observe system hardware and runtime environment
+            observer = SystemObserver()
+            detection = observer.observe()
+
+            # 3. Preflight capability evaluation
+            evaluator = CapabilityEvaluator()
+            capability_report = evaluator.evaluate(model=model_spec, detection=detection)
+
+            # 4. Check preflight verdict: ONLY proceed if READY!
+            if capability_report.verdict != EvaluationVerdict.READY:
+                error_msg = (
+                    f"Baseline execution skipped: preflight verdict is {capability_report.verdict.value}."
+                )
+                skipped_result = RunResult(
+                    status=ExecutionStatus.SKIPPED,
+                    runtime_name="pytorch_transformers_hip",
+                    model_id=model_spec.model_id,
+                    model_revision=model_spec.commit_sha,
+                    device_id=parsed_args.device,
+                    precision=parsed_args.precision,
+                    prompt=parsed_args.prompt,
+                    generated_text=None,
+                    input_tokens=None,
+                    generated_tokens=None,
+                    error=error_msg,
+                    generation_params={"max_new_tokens": parsed_args.max_new_tokens, "do_sample": False},
+                )
+
+                if parsed_args.json:
+                    sys.stdout.write(skipped_result.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(
+                        f"Preflight Check: {capability_report.verdict.value}\n"
+                        f"{error_msg}\n\n"
+                        "Reasons:\n"
+                    )
+                    for r in capability_report.reasons:
+                        sys.stdout.write(f"  [{r.severity.value.upper()}] {r.code}: {r.message}\n")
+                    sys.stdout.write("\nModel weights were NOT downloaded and inference was NOT executed.\n")
+
+                verdict_exit_codes = {
+                    EvaluationVerdict.NO_ACCELERATOR: 2,
+                    EvaluationVerdict.BLOCKED: 3,
+                    EvaluationVerdict.UNKNOWN: 4,
+                }
+                return verdict_exit_codes.get(capability_report.verdict, 1)
+
+            # 5. Preflight is READY: proceed to execution with HuggingFaceRunner
+            runner = HuggingFaceRunner()
+            try:
+                runner.load(
+                    model=model_spec,
+                    device_id=parsed_args.device,
+                    precision=parsed_args.precision,
+                )
+                run_result = runner.generate(
+                    prompt=parsed_args.prompt,
+                    max_new_tokens=parsed_args.max_new_tokens,
+                )
+                if parsed_args.json:
+                    sys.stdout.write(run_result.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_run_result(run_result) + "\n")
+                return 0
+            finally:
+                runner.unload()
+
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error: {exc}\n")
+            return 1
 
     return 0
 

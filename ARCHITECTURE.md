@@ -116,15 +116,20 @@ rocmhub/
 - **`CapabilityPolicy`**: Versioned reference defining known upstream architectures and format constraints.
 
 ### 3.4 `rocmhub.runners`
-- **`BaseRunner` (Protocol/ABC)**: Defines the common lifecycle:
-  - `initialize(model_spec, runtime_config, hardware_spec)`
-  - `warmup(sample_input)`
-  - `generate(prompt, max_tokens, **kwargs) -> GenerationOutput`
-  - `shutdown()`
-- **`HuggingFaceRunner`**: MVP baseline implementation utilizing PyTorch HIP backend:
-  - Loads model in requested precision (`fp16`, `bf16`, `fp32`).
-  - Moves tensors to target AMD device (`cuda:0` under HIP).
-  - Runs in `torch.inference_mode()`.
+- **`BaseRunner` (Protocol)**: Defines the common baseline execution lifecycle:
+  - `runner_name`: Unique string identifier (e.g. `"pytorch_transformers_hip"`).
+  - `supports(model: ModelSpec, capability_report: CapabilityReport) -> bool`: Verifies preflight readiness and architectural compatibility.
+  - `load(model: ModelSpec, device_id: int, precision: str) -> None`: Loads model and tokenizer into memory on concrete device.
+  - `generate(prompt: str, max_new_tokens: int = 16, **kwargs: Any) -> RunResult`: Executes deterministic inference, computing exact generated text and token counts.
+  - `unload() -> None`: Drops model/tokenizer references, runs garbage collection, and clears accelerator cache.
+- **`HuggingFaceRunner`**: MVP baseline implementation utilizing PyTorch + Transformers on AMD ROCm/HIP:
+  - Loads model using `AutoModelForCausalLM` and `AutoTokenizer` with immutable `revision=model.commit_sha` and `trust_remote_code=False`.
+  - Sets precision strictly (`fp32`, `fp16`, `bf16`).
+  - Dispatches to concrete target AMD device (e.g. `cuda:0` under HIP); never uses `device_map="auto"`.
+  - Deterministic generation (`temperature=0.0`, `do_sample=False`).
+  - Strict token accounting: `generated_tokens` counts exclusively newly decoded tokens, never input tokens.
+  - Memory cleanup on `unload()`: `gc.collect()` and `torch.cuda.empty_cache()` (if CUDA/HIP available).
+  - Preflight gating: if `capability_report.verdict != READY`, execution is skipped without downloading weights.
 
 ### 3.4 `rocmhub.benchmarks`
 - **`BenchmarkHarness`**: Controls warm-up cycles and timed iterations.
@@ -237,7 +242,27 @@ class ExperimentSpec:
     created_at_utc: str             # ISO-8601 UTC timestamp
 ```
 
-### 4.6 `BenchmarkResult`
+### 4.6 `RunResult`
+```python
+class RunResult:
+    schema_version: str = "1.0.0"
+    status: ExecutionStatus         # SUCCESS | FAILED | SKIPPED | NOT_MEASURED
+    runtime_name: str               # e.g. "pytorch_transformers_hip"
+    model_id: str                   # Model identifier
+    model_revision: str             # 40-character immutable commit SHA
+    device_id: int                  # Target accelerator index (e.g. 0)
+    precision: str                  # "fp32", "fp16", "bf16"
+    prompt: str                     # Prompt provided for inference
+    generated_text: str | None      # Strictly generated text excluding prompt (None if skipped/failed)
+    input_tokens: int | None        # Count of input tokens (None if skipped/failed)
+    generated_tokens: int | None    # Count of generated tokens excluding prompt (None if skipped/failed)
+    started_at_utc: str             # ISO-8601 UTC timestamp
+    finished_at_utc: str            # ISO-8601 UTC timestamp
+    error: str | None = None        # Error or skip reason description
+    generation_params: dict         # {"max_new_tokens": 16, "do_sample": False, ...}
+```
+
+### 4.7 `BenchmarkResult`
 ```python
 class BenchmarkResult:
     schema_version: str = "1.0.0"
@@ -255,7 +280,7 @@ class BenchmarkResult:
     raw_latencies_ms: list[float] | None = None # Raw per-token latencies for future analysis
 ```
 
-### 4.7 `ArtifactManifest`
+### 4.8 `ArtifactManifest`
 ```python
 class ArtifactManifest:
     schema_version: str = "1.0.0"

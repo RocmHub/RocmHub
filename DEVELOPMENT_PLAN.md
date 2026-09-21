@@ -119,15 +119,21 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Standardized exit codes: 0 (READY), 2 (NO_ACCELERATOR), 3 (BLOCKED), 4 (UNKNOWN), 1 (Error).
 - **Verification**: 79 tests (unit tests covering READY, NO_ACCELERATOR, ROCm missing, CPU PyTorch, unknown GFX, incomplete metadata, multi-GPU, structured reason codes + live network integration test on macOS).
 
-### Phase 6: Baseline Runner Adapter
-- [ ] Implement `rocmhub/runners/base.py`:
-  - Clean abstract protocol: `initialize()`, `warmup()`, `generate_stream()`, `shutdown()`.
-- [ ] Implement `rocmhub/runners/hf_runner.py`:
-  - Loads model using `AutoModelForCausalLM` and `AutoTokenizer`.
-  - Sets precision (`float16` or `bfloat16`).
-  - Dispatches to target AMD device (`cuda:0` under HIP).
-  - Implements a token-by-token streaming generator to measure exact token arrival times.
-- **Verification**: Execute test generation with prompt, asserting valid non-empty tokens and correct device placement.
+### Phase 5: Baseline Runner Adapter
+- [x] Implement `rocmhub/runners/base.py`:
+  - Abstract `BaseRunner` Protocol: `supports()`, `load()`, `generate()`, `unload()`.
+- [x] Implement `rocmhub/runners/hf_runner.py` (`pytorch_transformers_hip`):
+  - Model loading with immutable `revision=model.commit_sha` and `trust_remote_code=False`.
+  - Explicit device binding (`cuda:<device_id>`), no `device_map="auto"`.
+  - Strict precision validation (`fp32`, `fp16`, `bf16`).
+  - Deterministic generation (`temperature=0.0`, `do_sample=False`).
+  - Strict token accounting: `generated_tokens` counts only newly generated tokens, excluding prompt.
+  - Resource cleanup on `unload()`: `gc.collect()` and `torch.cuda.empty_cache()`.
+  - Resilient lazy torch/transformers imports with dependency injection support for testability.
+- [x] Add CLI command `rocmhub run <model_id> [--revision <rev>] [--device <id>] [--precision <dtype>] [--prompt <text>] [--max-new-tokens <n>] [--json]`:
+  - Preflight evaluation gating: halts immediately without downloading weights or running inference if `verdict != READY` (exits with 2 for `NO_ACCELERATOR`, 3 for `BLOCKED`, 4 for `UNKNOWN`).
+  - Outputs human-readable summary or structured `RunResult` JSON.
+- **Verification**: 96 tests (93 offline unit tests covering lifecycle, token counts, error states, preflight gating + 3 live network integration tests).
 
 ### Phase 6: Benchmark Harness & Metrics
 - [ ] Implement `rocmhub/benchmarks/metrics.py`:

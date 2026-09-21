@@ -93,12 +93,11 @@ def test_cli_env_with_mocked_gpu(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Compute Units:   96" in captured.out
 
 
-def test_cli_run_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = main(["run", "--model", "Qwen/Qwen2.5-0.5B-Instruct"])
+def test_cli_run_missing_model_id(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["run"])
     assert exit_code == 1
     captured = capsys.readouterr()
-    assert "NOT_IMPLEMENTED" in captured.err
-    assert "Phase 5-8" in captured.err
+    assert "model_id must be provided" in captured.err
 
 
 def test_cli_inspect_human_readable(capsys: pytest.CaptureFixture[str]) -> None:

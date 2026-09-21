@@ -18,14 +18,18 @@ from rocmhub.core.types import (
     ExperimentSpec,
     HardwareSpec,
     ModelSpec,
+    RunResult,
     SystemCapabilities,
 )
+from rocmhub.runners import BaseRunner, HuggingFaceRunner
 
 __all__ = [
     "__version__",
     "ROCmHubError",
     "CapabilityEvaluator",
     "CapabilityPolicy",
+    "BaseRunner",
+    "HuggingFaceRunner",
     "ExecutionStatus",
     "ModelSpec",
     "HardwareSpec",
@@ -37,6 +41,7 @@ __all__ = [
     "EvaluationSeverity",
     "EvaluationVerdict",
     "SystemCapabilities",
+    "RunResult",
     "ExperimentSpec",
     "BenchmarkResult",
     "ArtifactManifest",

@@ -88,9 +88,45 @@ class RemoteCodeRequiredError(ModelInspectionError):
 
 
 class RunnerExecutionError(ROCmHubError):
-    """Raised when inference runner fails during setup, warmup, or generation."""
+    """Base exception for inference runner failures during setup, warmup, or generation."""
 
     error_code = "RUNNER_EXECUTION_ERROR"
+
+
+class RunnerNotReadyError(RunnerExecutionError):
+    """Raised when generate() or an execution method is called before load()."""
+
+    error_code = "RUNNER_NOT_READY"
+
+
+class ModelLoadError(RunnerExecutionError):
+    """Raised when model weights or tokenizer fail to load onto the target device."""
+
+    error_code = "MODEL_LOAD_FAILED"
+
+
+class DeviceNotAvailableError(RunnerExecutionError):
+    """Raised when the requested accelerator device is not available or invalid."""
+
+    error_code = "DEVICE_NOT_AVAILABLE"
+
+
+class UnsupportedPrecisionError(RunnerExecutionError):
+    """Raised when the requested precision is unsupported or invalid."""
+
+    error_code = "UNSUPPORTED_PRECISION"
+
+
+class UnsupportedModelTypeError(RunnerExecutionError):
+    """Raised when the model architecture does not match the runner's supported baseline class."""
+
+    error_code = "UNSUPPORTED_MODEL_TYPE"
+
+
+class GenerationError(RunnerExecutionError):
+    """Raised when token generation or decoding encounters a runtime failure."""
+
+    error_code = "GENERATION_FAILED"
 
 
 class BenchmarkError(ROCmHubError):

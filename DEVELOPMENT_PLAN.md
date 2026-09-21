@@ -214,11 +214,38 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - **Core Invariant**: $\text{Artifact COMPLETE} \ne \text{Execution SUCCESS} \ne \text{Validation PASS} \ne \text{ROCmHub Verified}$.
 - **Verification**: 228 offline unit tests + 6 live network integration tests. Ruff clean. Mypy clean.
 
-### Phase 9: CLI Entrypoint & End-to-End Slice
-- [ ] Full end-to-end slice on real AMD ROCm hardware:
-  - `rocmhub inspect`, `rocmhub env`, `rocmhub check`, `rocmhub run`, `rocmhub benchmark`, `rocmhub validate`.
-  - Clean formatted output table using terminal colors/formatting.
-- **Verification**: Run `rocmhub validate Qwen/Qwen2.5-0.5B-Instruct` end-to-end on ROCm machine.
+### Phase 9: Benchmark Guard & Reproducibility Gate (COMPLETED)
+**Principle: BenchmarkHarness измеряет. BenchmarkGuard проверяет условия измерения и воспроизводимость.**
+- [x] Implement `rocmhub/guard/base.py`:
+  - Standard reason codes: `NO_BENCHMARK_EXECUTION`, `ARTIFACT_INTEGRITY_FAILED`, `INSUFFICIENT_MEASUREMENT_RUNS`, `EVIDENCE_INCONSISTENT`, `SUMMARY_MISMATCH`, `ENVIRONMENT_DRIFT`, `HARDWARE_THROTTLING_DETECTED`, `HARDWARE_ECC_ERRORS`, `HIGH_VARIABILITY`, `STABLE_MEASUREMENT`, `REFERENCE_DRIFT`, `TELEMETRY_UNAVAILABLE`.
+  - Default `DEFAULT_GUARD_POLICY` (min 5 runs, 15% TTFT MAD, 10% throughput MAD, 15% latency MAD, summary recomputation tolerance 1e-3).
+  - `ABBASequence` data contract for interleaved A/B/B/A baseline/candidate execution cycles.
+- [x] Implement `rocmhub/guard/statistics.py`:
+  - Sample median `compute_median(values)`.
+  - Median Absolute Deviation `compute_mad(values)`: $\text{MAD} = \text{median}(|x_i - \text{median}(X)|)$.
+  - Relative MAD `compute_relative_mad(values)`: $\frac{\text{MAD}}{\text{median}}$.
+  - Independent headline summary recomputation `recompute_benchmark_summary(measurements)`.
+  - `verify_summary_against_raw()`: detects discrepancies and tampering between raw run timestamps and reported metrics.
+- [x] Implement `rocmhub/guard/environment.py`:
+  - `extract_environment_fingerprint()`: extracts normalized deterministic dictionary, strips ephemeral noise, computes canonical SHA-256 hash.
+  - `compare_fingerprints()`: detects exact drift and returns diff dictionary.
+- [x] Implement `rocmhub/guard/reference.py`:
+  - `evaluate_hardware_health()`: validates throttling and uncorrectable ECC errors.
+  - `compare_reference_measurements()`: evaluates calibration drift; returns `None` if reference was not measured (never `True`).
+- [x] Implement `rocmhub/guard/evaluator.py`:
+  - `BenchmarkGuard.evaluate(artifact_path)`: multi-gate verification pipeline (Integrity -> Execution Check -> Environment Match -> Hardware Health -> Raw Evidence Completeness -> Summary Recomputation -> MAD Dispersion -> Reference Calibration).
+  - Diagnostic artifacts cleanly evaluate to `NOT_MEASURED` (reason: `NO_BENCHMARK_EXECUTION`).
+  - Corrupted/tampered artifacts fail immediately (`ARTIFACT_INTEGRITY_FAILED`).
+  - Verdict system: `PASS | FAIL | INCONCLUSIVE | NOT_MEASURED`.
+- [x] Implement CLI command `rocmhub guard <path> [--json]`:
+  - Formatted human-readable summary table and structured JSON report.
+  - Exit codes: 0 (PASS), 2 (NOT_MEASURED), 3 (FAIL), 4 (INCONCLUSIVE), 1 (Error).
+- **Verification**: 244 offline tests (16 new Phase 9 tests) + 7 live network integration tests. Ruff clean. Mypy clean. Real CLI verification on macOS returns `NOT_MEASURED` with code 2.
+
+### Phase 10: Verified Gate & Registry Preparation
+- [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
+- [ ] Local and remote registry packaging.
+- **Verification**: End-to-end certification workflow test.
 
 ---
 
@@ -236,20 +263,12 @@ Vertical Slice 1 is considered complete when all of the following criteria are m
 4. **Reproducible Artifact**:
    An output directory is generated containing:
    - `manifest.json` with immutable Git commit SHA, valid SHA256 checksum and schema compliance.
-   - `metrics.json`.
-   - `reproduce.sh` which can be re-run to reproduce the experiment.
+   - `metrics.json` / `benchmark.json` and `benchmark_raw.json`.
+   - `reproduce.json` which can be used to reproduce the experiment.
 5. **Architectural Cleanliness**:
    - Zero hardcoded references to specific runtime engines in the core domain.
-   - Decoupled modules (Model, Hardware, Runner, Benchmark, Artifact).
-   - Automated tests (`pytest`) covering data models, inspector, benchmark math, and artifact generation.
+   - Decoupled modules (Model, Hardware, Runner, Benchmark, Validation, Artifact, Guard).
+   - Automated tests (`pytest`) covering data models, inspector, benchmark math, validation, artifacts, and guard.
 6. **Graceful Degradation**:
    On non-AMD machines (e.g. macOS dev environment or CPU CI), the tool does not crash; it reports hardware diagnostics and can execute in a verified diagnostic mode without generating fake performance data.
 
----
-
-## 4. Next Step
-
-**Phase 1 & 2 Implementation**:
-1. Initialize repository structure and configuration (`pyproject.toml`, `.gitignore`, `README.md`).
-2. Implement `rocmhub.core.types` with data models (`ModelSpec`, `HardwareSpec`, `EnvironmentSpec`, `ExperimentSpec`, `BenchmarkResult`, `ArtifactManifest`).
-3. Add initial unit tests to establish test-driven validation from commit #1.

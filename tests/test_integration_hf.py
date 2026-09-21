@@ -229,3 +229,41 @@ def test_live_artifact_build_and_verify_qwen_model_on_current_mac(
     assert len(verify_data["missing_files"]) == 0
     assert len(verify_data["modified_files"]) == 0
     assert len(verify_data["unexpected_files"]) == 0
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_guard_qwen_model_on_current_mac(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Live integration test: rocmhub guard audits diagnostic bundle on Mac and returns NOT_MEASURED (exit 2)."""
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    out_dir = tmp_path / "artifacts"
+    build_code = main(["artifact", "build", model_id, "--output-dir", str(out_dir), "--json"])
+    assert build_code == 0
+    capsys.readouterr()  # clear buffer
+
+    created_dirs = list(out_dir.iterdir())
+    assert len(created_dirs) == 1
+    artifact_dir = created_dirs[0]
+
+    # 1. Guard audit with JSON output
+    guard_code_json = main(["guard", str(artifact_dir), "--json"])
+    assert guard_code_json == 2
+
+    captured = capsys.readouterr()
+    report_dict = json.loads(captured.out)
+    assert report_dict["verdict"] == "NOT_MEASURED"
+    assert "NO_BENCHMARK_EXECUTION" in report_dict["reasons"]
+    assert report_dict["valid_runs"] == 0
+    assert report_dict["ttft_variability"] is None
+    assert report_dict["throughput_variability"] is None
+    assert report_dict["reference_stable"] is None
+
+    # 2. Guard audit with human table output
+    guard_code_text = main(["guard", str(artifact_dir)])
+    assert guard_code_text == 2
+
+    captured_text = capsys.readouterr()
+    assert "Guard Verdict:             NOT_MEASURED" in captured_text.out
+    assert "NO_BENCHMARK_EXECUTION" in captured_text.out

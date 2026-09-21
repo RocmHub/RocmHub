@@ -52,6 +52,23 @@ class ArtifactStatus(str, Enum):
     INVALID = "INVALID"
 
 
+class GuardVerdict(str, Enum):
+    """Verdict of the Benchmark Guard determining evidence validity and reproducibility."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    NOT_MEASURED = "NOT_MEASURED"
+
+
+class ExperimentRole(str, Enum):
+    """Role of an experiment in a comparative evaluation."""
+
+    BASELINE = "BASELINE"
+    CANDIDATE = "CANDIDATE"
+    REFERENCE = "REFERENCE"
+
+
 class ModelSpec(BaseModel):
     """Specification of the AI model under test."""
 
@@ -689,3 +706,119 @@ class ArtifactManifest(BaseModel):
         if not self.manifest_checksum:
             return False
         return self.compute_canonical_checksum() == self.manifest_checksum
+
+
+class HardwareHealthSnapshot(BaseModel):
+    """Snapshot of hardware health and telemetry observed during execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    device_id: Optional[int] = Field(default=None, description="Target GPU device index")
+    temperature_c: Optional[float] = Field(default=None, description="GPU temperature in degrees Celsius")
+    power_w: Optional[float] = Field(default=None, description="Instantaneous power consumption in Watts")
+    gpu_utilization_percent: Optional[float] = Field(default=None, description="GPU compute utilization percentage")
+    memory_utilization_percent: Optional[float] = Field(default=None, description="VRAM memory utilization percentage")
+    clock_mhz: Optional[int] = Field(default=None, description="Engine/shader clock frequency in MHz")
+    memory_clock_mhz: Optional[int] = Field(default=None, description="Memory clock frequency in MHz")
+    ecc_errors: Optional[int] = Field(default=None, description="Uncorrectable ECC error count")
+    throttling_detected: Optional[bool] = Field(default=None, description="Whether thermal or power throttling was observed")
+
+
+class GuardPolicy(BaseModel):
+    """Configurable thresholds and rules governing the Benchmark Guard reproducibility evaluation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    policy_version: str = Field(default="1.0.0", description="Policy version identifier")
+    min_measurement_runs: int = Field(default=5, description="Minimum number of successful measurement runs required")
+    max_relative_mad_ttft: float = Field(default=0.15, description="Maximum allowed relative MAD for TTFT (15%)")
+    max_relative_mad_throughput: float = Field(default=0.10, description="Maximum allowed relative MAD for throughput (10%)")
+    max_relative_mad_latency: float = Field(default=0.15, description="Maximum allowed relative MAD for total latency (15%)")
+    require_environment_match: bool = Field(default=True, description="Enforce strict matching of expected environment fingerprint")
+    require_complete_benchmark: bool = Field(default=True, description="Require zero failed measurement runs")
+    strict_telemetry: bool = Field(default=False, description="Require telemetry availability (rejects runs without telemetry if True)")
+    max_tolerated_ecc_errors: int = Field(default=0, description="Maximum allowable ECC errors before flagging FAIL")
+    summary_recomputation_tolerance: float = Field(default=1e-3, description="Relative tolerance for summary recomputation checks")
+
+
+class EnvironmentFingerprint(BaseModel):
+    """Deterministic, canonical hardware and software environment signature."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of fingerprint")
+    fingerprint_hash: str = Field(..., description="Canonical SHA-256 digest of normalized environment attributes")
+    attributes: Dict[str, Any] = Field(..., description="Normalized environment attributes excluding ephemeral runtime noise")
+
+
+class ReferenceMeasurement(BaseModel):
+    """Calibration or baseline reference measurement recorded before/after evaluation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference_id: str = Field(..., description="Reference benchmark or hardware check identifier")
+    metric_name: str = Field(..., description="Name of measured reference metric, e.g. 'kernel_gemm_tflops'")
+    value: float = Field(..., description="Measured numerical value")
+    timestamp_utc: str = Field(default_factory=_utc_now_iso, description="ISO-8601 UTC timestamp")
+
+
+class ReferenceComparison(BaseModel):
+    """Comparison of reference metrics across experiment iterations to detect hardware drift."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference_id: str = Field(..., description="Reference benchmark identifier")
+    metric_name: str = Field(..., description="Name of reference metric")
+    before_value: float = Field(..., description="Reference measurement before experiment")
+    after_value: float = Field(..., description="Reference measurement after experiment")
+    relative_change: float = Field(..., description="Relative variation |after - before| / before")
+    stable: bool = Field(..., description="True if relative variation is within acceptable bounds")
+
+
+class ReproducibilityReport(BaseModel):
+    """Independent audit report deciding whether benchmark evidence is valid, truthful, and reproducible."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of report")
+    artifact_id: str = Field(..., description="Artifact bundle identifier evaluated")
+    experiment_id: str = Field(..., description="Experiment configuration identifier")
+    policy_version: str = Field(default="1.0.0", description="Version of GuardPolicy applied")
+
+    verdict: GuardVerdict = Field(..., description="Guard verdict: PASS, FAIL, INCONCLUSIVE, or NOT_MEASURED")
+
+    environment_consistent: bool = Field(..., description="True if observed environment matches expected fingerprint")
+    hardware_consistent: bool = Field(..., description="True if no throttling or unrecoverable hardware errors were detected")
+    benchmark_complete: bool = Field(..., description="True if all requested measurement runs completed without error")
+    reference_stable: Optional[bool] = Field(
+        default=None,
+        description="True if before/after reference checks were stable; None if reference measurements are absent",
+    )
+
+    measurement_runs: int = Field(..., description="Total measurement runs evaluated")
+    valid_runs: int = Field(..., description="Successful measurement runs analyzed")
+
+    ttft_variability: Optional[float] = Field(default=None, description="Relative MAD for TTFT across valid runs")
+    throughput_variability: Optional[float] = Field(default=None, description="Relative MAD for throughput across valid runs")
+    itl_variability: Optional[float] = Field(default=None, description="Relative MAD for total latency / ITL across valid runs")
+
+    reasons: List[str] = Field(default_factory=list, description="Structured reason codes explaining verdict")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings or advisories")
+    created_at_utc: str = Field(default_factory=_utc_now_iso, description="Evaluation timestamp in UTC")
+
+    @model_validator(mode="after")
+    def validate_guard_report_invariants(self) -> ReproducibilityReport:
+        """Enforce guard verdict integrity."""
+        if self.verdict == GuardVerdict.PASS:
+            if not self.environment_consistent:
+                raise ValueError("PASS verdict requires environment_consistent=True")
+            if not self.hardware_consistent:
+                raise ValueError("PASS verdict requires hardware_consistent=True")
+            if not self.benchmark_complete:
+                raise ValueError("PASS verdict requires benchmark_complete=True")
+            if self.valid_runs < 1:
+                raise ValueError("PASS verdict requires at least one valid measurement run")
+        elif self.verdict == GuardVerdict.NOT_MEASURED:
+            if self.ttft_variability is not None or self.throughput_variability is not None:
+                raise ValueError("NOT_MEASURED verdict cannot have variability metrics recorded")
+        return self

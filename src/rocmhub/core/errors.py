@@ -201,6 +201,36 @@ class SecretDetectedError(ArtifactError):
     error_code = "SECRET_DETECTED"
 
 
+class GuardError(ROCmHubError):
+    """Base exception for Benchmark Guard and reproducibility verification failures."""
+
+    error_code = "GUARD_ERROR"
+
+
+class EnvironmentDriftError(GuardError):
+    """Raised when the observed runtime environment diverges from the expected environment fingerprint."""
+
+    error_code = "ENVIRONMENT_DRIFT"
+
+
+class EvidenceInconsistentError(GuardError):
+    """Raised when raw measurements contradict summary results or violate metric invariants."""
+
+    error_code = "EVIDENCE_INCONSISTENT"
+
+
+class SummaryMismatchError(GuardError):
+    """Raised when recomputed summary metrics diverge from recorded values in BenchmarkResult."""
+
+    error_code = "SUMMARY_MISMATCH"
+
+
+class HardwareHealthError(GuardError):
+    """Raised when hardware health telemetry indicates throttling or uncorrectable hardware degradation."""
+
+    error_code = "HARDWARE_HEALTH_ERROR"
+
+
 class NotImplementedFeatureError(ROCmHubError):
     """Raised when a feature planned for a future phase is requested."""
 

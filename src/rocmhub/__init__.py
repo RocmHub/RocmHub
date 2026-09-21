@@ -1,5 +1,7 @@
 """ROCmHub: Automated AI model preparation, optimization, and benchmarking for AMD GPUs and ROCm."""
 
+from __future__ import annotations
+
 __version__ = "0.1.0"
 
 from rocmhub.artifacts import ArtifactBuilder, LocalArtifactStore
@@ -20,14 +22,22 @@ from rocmhub.core.types import (
     CapabilityReport,
     DetectionReport,
     DeviceCapabilityAssessment,
+    EnvironmentFingerprint,
     EnvironmentSpec,
     EvaluationReason,
     EvaluationSeverity,
     EvaluationVerdict,
     ExecutionStatus,
+    ExperimentRole,
     ExperimentSpec,
+    GuardPolicy,
+    GuardVerdict,
+    HardwareHealthSnapshot,
     HardwareSpec,
     ModelSpec,
+    ReferenceComparison,
+    ReferenceMeasurement,
+    ReproducibilityReport,
     ReproductionMetadata,
     RunResult,
     SystemCapabilities,
@@ -36,6 +46,11 @@ from rocmhub.core.types import (
     ValidationReport,
     ValidationRunResult,
     ValidationVerdict,
+)
+from rocmhub.guard import (
+    DEFAULT_GUARD_POLICY,
+    ABBASequence,
+    BenchmarkGuard,
 )
 from rocmhub.runners import BaseRunner, HuggingFaceRunner
 from rocmhub.validation import ValidationConfig, ValidationEvaluator
@@ -79,4 +94,15 @@ __all__ = [
     "ArtifactManifest",
     "ArtifactBuilder",
     "LocalArtifactStore",
+    "GuardVerdict",
+    "ExperimentRole",
+    "HardwareHealthSnapshot",
+    "GuardPolicy",
+    "EnvironmentFingerprint",
+    "ReferenceMeasurement",
+    "ReferenceComparison",
+    "ReproducibilityReport",
+    "BenchmarkGuard",
+    "ABBASequence",
+    "DEFAULT_GUARD_POLICY",
 ]

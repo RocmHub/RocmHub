@@ -20,12 +20,15 @@ from rocmhub.core.types import (
     DetectionReport,
     EvaluationVerdict,
     ExecutionStatus,
+    GuardVerdict,
     ModelSpec,
+    ReproducibilityReport,
     RunResult,
     ValidationMode,
     ValidationReport,
     ValidationVerdict,
 )
+from rocmhub.guard import BenchmarkGuard
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
@@ -337,6 +340,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output ArtifactVerificationResult as pure JSON on stdout.",
     )
 
+    # Command: guard
+    guard_parser = subparsers.add_parser(
+        "guard",
+        help="Evaluate benchmark reproducibility, sample variability, and artifact evidence truthfulness.",
+    )
+    guard_parser.add_argument(
+        "path",
+        help="Filesystem path to the artifact bundle directory or artifact ID.",
+    )
+    guard_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ReproducibilityReport as pure JSON on stdout.",
+    )
+
     return parser
 
 
@@ -646,6 +664,51 @@ def _format_verification_result(res: ArtifactVerificationResult) -> str:
         lines.extend(["", "Errors:"])
         for err in res.errors:
             lines.append(f"  - {err}")
+
+    return "\n".join(lines)
+
+
+def _format_reproducibility_report(report: ReproducibilityReport) -> str:
+    """Format ReproducibilityReport into clean human-readable output."""
+    verdict_str = report.verdict.value
+
+    def _fmt_pct(val: Optional[float]) -> str:
+        if val is None:
+            return "n/a"
+        return f"{val * 100.0:.2f}%"
+
+    ref_str = "n/a" if report.reference_stable is None else ("stable" if report.reference_stable else "DRIFTED")
+
+    lines = [
+        f"{'Guard Verdict:':<26} {verdict_str}",
+        f"{'Artifact ID:':<26} {report.artifact_id}",
+        f"{'Experiment ID:':<26} {report.experiment_id}",
+        f"{'Policy Version:':<26} {report.policy_version}",
+        "",
+        f"{'Environment Match:':<26} {'yes' if report.environment_consistent else 'DRIFT DETECTED'}",
+        f"{'Hardware Consistent:':<26} {'yes' if report.hardware_consistent else 'THROTTLED / ERRORS'}",
+        f"{'Benchmark Complete:':<26} {'yes' if report.benchmark_complete else 'no'}",
+        f"{'Reference Calibration:':<26} {ref_str}",
+        "",
+        f"{'Measurement Runs:':<26} {report.valid_runs} valid of {report.measurement_runs} total",
+        f"{'TTFT Variability (MAD):':<26} {_fmt_pct(report.ttft_variability)}",
+        f"{'Throughput Var. (MAD):':<26} {_fmt_pct(report.throughput_variability)}",
+        f"{'Latency Variability (MAD):':<26} {_fmt_pct(report.itl_variability)}",
+        "",
+        f"{'Final Verdict:':<26} {verdict_str}",
+    ]
+
+    if report.reasons:
+        lines.append("")
+        lines.append("Reasons:")
+        for r in report.reasons:
+            lines.append(f"  - {r}")
+
+    if report.warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for w in report.warnings:
+            lines.append(f"  - {w}")
 
     return "\n".join(lines)
 
@@ -1193,6 +1256,31 @@ def main(args: Optional[List[str]] = None) -> int:
             except Exception as exc:
                 sys.stderr.write(f"Unexpected error: {exc}\n")
                 return 1
+
+    if parsed_args.command == "guard":
+        try:
+            guard = BenchmarkGuard()
+            guard_report = guard.evaluate(parsed_args.path)
+
+            if parsed_args.json:
+                sys.stdout.write(guard_report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_reproducibility_report(guard_report) + "\n")
+
+            # Exit codes: 0=PASS, 2=NOT_MEASURED, 3=FAIL, 4=INCONCLUSIVE, 1=Error
+            verdict_exit_codes_guard = {
+                GuardVerdict.PASS: 0,
+                GuardVerdict.NOT_MEASURED: 2,
+                GuardVerdict.FAIL: 3,
+                GuardVerdict.INCONCLUSIVE: 4,
+            }
+            return verdict_exit_codes_guard.get(guard_report.verdict, 1)
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Guard error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error in guard: {exc}\n")
+            return 1
 
     return 0
 

@@ -146,12 +146,18 @@ rocmhub/
 - **Distinction**: `BenchmarkResult` `SUCCESS` $\ne$ `ROCmHub Verified`. A successful benchmark confirms execution speed; verification requires subsequent quality, perplexity, and reproducibility evaluation.
 
 ### 3.6 `rocmhub.artifacts`
-- **`ArtifactBuilder`**: Bundles:
-  - `manifest.json`: Machine-readable metadata conforming to `ArtifactManifest` schema.
-  - `metrics.json`: Detailed benchmark statistics and optional raw samples.
-  - `environment.json`: Complete snapshot of system, driver, and packages.
-  - `run.log`: Console and stderr logs.
-  - `reproduce.sh`: Executable bash script reproducing the exact run.
+- **`ArtifactBuilder`**: Bundles multi-stage execution evidence into an immutable, self-contained bundle (`manifest.json`, `checksums.json`, `model.json`, `environment.json`, `capabilities.json`, `run.json`, `benchmark.json`, `benchmark_raw.json`, `validation.json`, `reproduce.json`).
+- **`LocalArtifactStore`**: Atomic directory publication, conflict prevention against silent overwrites, and strict cryptographic inventory verification.
+
+### 3.7 `rocmhub.guard`
+- **Principle**: *BenchmarkHarness measures. BenchmarkGuard audits measurement conditions, sample stability, and truthfulness.*
+- **Independence**: Completely isolated from Runner, Benchmark Harness, and any future optimization agent.
+- **Robust Statistics**: Avoids mean and standard deviation on small or noisy samples; employs true sample Median and Median Absolute Deviation ($\text{MAD} = \text{median}(|x_i - \text{median}(X)|)$) and Relative MAD ($\frac{\text{MAD}}{\text{median}}$).
+- **Environment Drift Detection**: Derives deterministic SHA-256 fingerprint from canonical software and hardware attributes, catching runtime drift between baseline and candidate environments.
+- **Hardware Health & Telemetry**: Validates thermal throttling, power limits, and uncorrectable memory ECC errors.
+- **Headline Summary Recomputation**: Audits recorded headline metrics directly against raw individual token timestamps. Catches divergence or manual metric tampering.
+- **Calibration Reference Runs**: Compares before/after microbenchmarks (e.g. GEMM kernels) to isolate thermal or cluster-level drift.
+- **Diagnostic Mode Integrity**: Preflight-skipped/diagnostic artifacts evaluate strictly to `GuardVerdict.NOT_MEASURED` (reason: `NO_BENCHMARK_EXECUTION`, exit code 2).
 
 ---
 
@@ -181,9 +187,15 @@ Capability Evaluator ──> CapabilityReport
            ├── capabilities.json
            ├── run.json
            ├── benchmark.json
-           ├── benchmark_raw.json (optional)
+           ├── benchmark_raw.json (raw token timestamps & runs)
            ├── validation.json
            └── reproduce.json
+                       │
+                       ▼
+                Benchmark Guard
+                       │
+                       ▼
+             ReproducibilityReport (Reproducibility Gate)
 ```
 
 > [!IMPORTANT]
@@ -508,12 +520,13 @@ RocmHub/
 
 ## 8. Future Extension Points
 
-1. **AI Engineer Optimization Agent**: Plugs in after `baseline execution`. Proposes candidate configs (quantization, runtime backends, kernel configurations) and sends them to the runner.
-2. **Benchmark Guard**: An independent arbiter that re-benchmarks agent-proposed candidates in a sealed, unmanipulated harness to ensure true Pareto improvements.
-3. **Alternative Runtimes**:
+1. **Benchmark Guard & Reproducibility Gate**: *(Completed in Phase 9)* Independent arbiter auditing measurement stability, environment drift, hardware health, and summary truthfulness.
+2. **Verified Badge / Gate**: Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
+3. **AI Engineer Optimization Agent**: Plugs in after baseline verification. Proposes candidate configs (quantization, runtime backends, kernel configurations) and evaluates against baseline in interleaved A/B/B/A sequences.
+4. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.
    - `SGLangRunner`: Fast RadixAttention runner.
    - `LlamaCppHipRunner`: Minimal C++ GGUF inference via hipBLAS.
-4. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
-5. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
-6. **ROCmHub Registry**: Remote artifact publishing and model hub integration.
+5. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
+6. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
+7. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.

@@ -112,10 +112,12 @@ class EnvironmentSpec(BaseModel):
 
     schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of EnvironmentSpec")
     os: str = Field(..., description="Operating system release, e.g. 'Linux 6.8.0-40-generic' or 'Darwin 24.0.0'")
+    kernel: Optional[str] = Field(default=None, description="Operating system kernel release, e.g. '6.8.0-40-generic'")
+    architecture: Optional[str] = Field(default=None, description="Host CPU architecture, e.g. 'x86_64' or 'arm64'")
     python_version: str = Field(..., description="Python interpreter version, e.g. '3.11.9'")
     rocm_version: Optional[str] = Field(default=None, description="Installed ROCm version, e.g. '6.2.0', or None")
     hip_version: Optional[str] = Field(default=None, description="Installed HIP runtime version, or None")
-    torch_version: str = Field(..., description="PyTorch version string, e.g. '2.4.0+rocm6.2' or '2.4.0'")
+    torch_version: str = Field(..., description="PyTorch version string, e.g. '2.4.0+rocm6.2', or 'not_installed'")
     torch_hip_available: bool = Field(
         default=False,
         description="True if PyTorch has functional ROCm/HIP backend (torch.cuda.is_available() on ROCm PyTorch)",
@@ -123,6 +125,24 @@ class EnvironmentSpec(BaseModel):
     env_vars: Dict[str, str] = Field(
         default_factory=dict,
         description="Recorded environment variables (e.g. HSA_OVERRIDE_GFX_VERSION, HIP_VISIBLE_DEVICES)",
+    )
+
+
+class DetectionReport(BaseModel):
+    """Observation report from system hardware and environment discovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of DetectionReport")
+    environment: EnvironmentSpec = Field(..., description="Observed software environment")
+    gpus: List[HardwareSpec] = Field(default_factory=list, description="List of detected GPUs (0 or more)")
+    provenance: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Source provenance for discovered fields, e.g. {'gfx_target[0]': 'rocminfo'}",
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Non-fatal diagnostic warnings collected during hardware observation",
     )
 
 

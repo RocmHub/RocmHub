@@ -44,9 +44,9 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 
 ## 2. Implementation Stages (Step-by-Step)
 
-### Phase 1: Project Foundation & Tooling
-- [ ] Create repository base: `.gitignore`, `pyproject.toml`, `README.md`.
-- [ ] Define minimal dependencies:
+### Phase 1: Project Foundation & Tooling (COMPLETED)
+- [x] Create repository base: `.gitignore`, `pyproject.toml`, `README.md`.
+- [x] Define minimal dependencies:
   - `torch` (with ROCm support on AMD systems, standard on dev/CI).
   - `transformers`, `huggingface_hub`, `safetensors`.
   - `pydantic` (for robust schemas, serialization, and validation).
@@ -54,24 +54,38 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - `pytest` for automated testing.
 - **Verification**: `pytest` runs and passes with basic smoke test.
 
-### Phase 2: Core Domain Types & Schemas
-- [ ] Implement `rocmhub/core/types.py`:
+### Phase 2: Core Domain Types & Schemas (COMPLETED)
+- [x] Implement `rocmhub/core/types.py`:
   - `ExecutionStatus`: Enum (`SUCCESS`, `FAILED`, `SKIPPED`, `NOT_MEASURED`).
   - `ModelSpec`: `schema_version`, model identifier, requested revision, immutable resolved `commit_sha`, architecture, parameter count.
-  - `HardwareSpec`: `schema_version`, `gpu_present`, `gpu_vendor`, `device_id`, `device_name`, `family`, open `gfx_target: str | None`, `vram_total_mb`.
-  - `EnvironmentSpec`: `schema_version`, OS, kernel, `rocm_version` (nullable), `hip_version` (nullable), PyTorch version, active flags.
+  - `HardwareSpec`: `schema_version`, `gpu_present`, `gpu_vendor`, `device_id`, `device_name`, `family`, open `gfx_target: str | None`, `vram_total_mb`, `vram_free_mb`, `compute_units`, `bus_id`.
+  - `EnvironmentSpec`: `schema_version`, OS, kernel, architecture, `rocm_version` (nullable), `hip_version` (nullable), PyTorch version, active flags.
+  - `DetectionReport`: Bundles `EnvironmentSpec`, `List[HardwareSpec]`, observation provenance, and diagnostic warnings.
   - `ExperimentSpec`: Bundles model, hardware, environment, precision, runtime, UTC timestamp.
   - `BenchmarkResult`: Explicit `ExecutionStatus`, nullable metric fields (`ttft_ms`, `itl_ms_mean`, `itl_ms_p50`, `itl_ms_p90`, `itl_ms_p99`, `throughput_tokens_per_sec`, `peak_vram_used_mb`), and optional `raw_latencies_ms`.
   - `ArtifactManifest`: Canonical schema for the generated artifact with checksum.
 - **Verification**: Unit tests validating serialization/deserialization, nullable metrics in diagnostic runs, round-trip JSON, and schema validation.
 
-### Phase 3: Hardware & Environment Detection
-- [ ] Implement `rocmhub/hardware/detector.py`:
-  - Real detector: inspects `torch.version.hip`, `torch.cuda.get_device_name()`, `/sys/class/kfd`, `rocm-smi` / `rocminfo` for dynamic gfx target string (e.g. `"gfx942"`, `"gfx1100"`, `"unknown"`).
-  - Diagnostic/Mock detector: activated when running in non-ROCm environments (e.g. macOS development, CI without AMD GPU), allowing pipeline orchestration and validation without fake metrics.
-- [ ] Implement `rocmhub/hardware/environment.py`:
-  - Captures driver versions, Linux kernel, ROCm paths, and override variables (`HSA_OVERRIDE_GFX_VERSION`).
-- **Verification**: Unit tests on mock detector + real detection test asserting correct field structure.
+### Phase 3: Hardware & Environment Detection (COMPLETED)
+- [x] Implement `rocmhub/hardware/base.py`:
+  - `HardwareDetector` protocol (`detect_gpus() -> Tuple[List[HardwareSpec], Dict[str, str], List[str]]`).
+- [x] Implement `rocmhub/hardware/detector.py`:
+  - Strict observation layer: reports actual detected state without policy decisions or compatibility judgments.
+  - Multi-tier prioritized fallback:
+    1. PyTorch HIP runtime (`torch.cuda` with ROCm)
+    2. `rocminfo` (HSA agent enumeration)
+    3. `amd-smi` (modern AMD SMI)
+    4. `rocm-smi` (legacy SMI)
+    5. Linux sysfs / KFD topology (`/sys/class/kfd/topology/nodes/`)
+  - Dynamic discovery of `gfx_target` as an open string via regex (e.g. `gfx1100`, `gfx942`, unlisted custom targets).
+  - Multi-GPU enumeration support (`List[HardwareSpec]`).
+  - Safe subprocess execution: fixed timeout, `LC_ALL=C`, no shell, no sudo, non-zero exits captured as warnings.
+  - Diagnostic mode on non-AMD / macOS / CI: returns 0 GPUs cleanly without error (exit code 0, no synthetic metrics).
+- [x] Implement `rocmhub/hardware/environment.py`:
+  - Captures OS, kernel, architecture, Python, PyTorch/HIP versions, and ROCm paths.
+  - Enforces strict whitelist of ROCm environment variables (`HSA_OVERRIDE_GFX_VERSION`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, etc.), preventing sensitive credential or secret leaks.
+- [x] CLI command: `rocmhub env [--json]`.
+- **Verification**: 60 unit & integration tests covering diagnostic mode, mocked Radeon RX 7900 XTX, Instinct MI300X, multi-GPU discovery, fallback tiers, and secret isolation.
 
 ### Phase 4: Model Source & Inspection (COMPLETED)
 - [x] Implement `rocmhub/models/base.py`:

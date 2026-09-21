@@ -8,7 +8,8 @@ from typing import List, Optional
 
 from rocmhub import __version__
 from rocmhub.core.errors import ROCmHubError
-from rocmhub.core.types import ModelSpec
+from rocmhub.core.types import DetectionReport, ModelSpec
+from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
 
@@ -37,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     env_parser.add_argument(
         "--json",
         action="store_true",
-        help="Output detected environment as JSON.",
+        help="Output detected environment as pure JSON.",
     )
 
     # Command: inspect
@@ -85,6 +86,49 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _format_detection_report(report: DetectionReport) -> str:
+    """Format DetectionReport into clean human-readable output."""
+    env = report.environment
+    lines = [
+        f"{'System:':<16} {env.os}",
+        f"{'Kernel:':<16} {env.kernel or 'None'}",
+        f"{'Architecture:':<16} {env.architecture or 'None'}",
+        f"{'Python:':<16} {env.python_version}",
+        f"{'PyTorch:':<16} {env.torch_version}",
+        f"{'ROCm:':<16} {env.rocm_version or 'not detected'}",
+        f"{'HIP:':<16} {env.hip_version or 'not detected'}",
+    ]
+
+    if env.env_vars:
+        lines.append("")
+        lines.append("Active ROCm Environment Variables:")
+        for k, v in sorted(env.env_vars.items()):
+            lines.append(f"  {k} = {v}")
+
+    lines.append("")
+    gpu_count = len(report.gpus)
+    lines.append(f"Detected GPUs: {gpu_count}")
+
+    if gpu_count == 0:
+        lines.append(f"{'Status:':<16} diagnostic / no compatible AMD runtime detected")
+    else:
+        for i, gpu in enumerate(report.gpus):
+            lines.append("")
+            lines.append(f"GPU {i}:")
+            lines.append(f"  {'Vendor:':<16} {gpu.gpu_vendor or 'None'}")
+            lines.append(f"  {'Device:':<16} {gpu.device_name or 'None'}")
+            lines.append(f"  {'Device ID:':<16} {gpu.device_id if gpu.device_id is not None else 'None'}")
+            if gpu.family:
+                lines.append(f"  {'Family:':<16} {gpu.family}")
+            lines.append(f"  {'gfx target:':<16} {gpu.gfx_target or 'None'}")
+            vram_str = f"{gpu.vram_total_mb:,} MB" if gpu.vram_total_mb is not None else "None"
+            lines.append(f"  {'VRAM:':<16} {vram_str}")
+            cu_str = f"{gpu.compute_units}" if gpu.compute_units is not None else "None"
+            lines.append(f"  {'Compute Units:':<16} {cu_str}")
+
+    return "\n".join(lines)
+
+
 def _format_model_spec(spec: ModelSpec) -> str:
     """Format ModelSpec into a readable summary table."""
     params_str = "None"
@@ -124,10 +168,17 @@ def main(args: Optional[List[str]] = None) -> int:
         return 0
 
     if parsed_args.command == "env":
-        sys.stderr.write(
-            "rocmhub env: NOT_IMPLEMENTED (Scheduled for Phase 3: Hardware & Environment Detection)\n"
-        )
-        return 1
+        try:
+            observer = SystemObserver()
+            report = observer.observe()
+            if parsed_args.json:
+                sys.stdout.write(report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_detection_report(report) + "\n")
+            return 0
+        except Exception as exc:
+            sys.stderr.write(f"Error during environment detection: {exc}\n")
+            return 1
 
     if parsed_args.command == "inspect":
         try:

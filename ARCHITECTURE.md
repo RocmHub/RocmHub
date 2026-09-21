@@ -83,17 +83,24 @@ rocmhub/
   - Rejects untrusted remote code with `RemoteCodeRequiredError` if architecture resolution requires executing repository scripts.
 
 ### 3.2 `rocmhub.hardware`
-- **`HardwareDetector`**: Queries hardware capabilities dynamically:
-  - GPU product name (e.g., `AMD Instinct MI300X`, `AMD Radeon RX 7900 XTX`, or `None` if non-GPU host).
-  - Target architecture (`gfx_target: str`, open string discovered from `rocminfo` or sysfs).
-  - Total and available VRAM.
-  - Compute Unit (CU) count and bus information if available.
-- **`EnvironmentDetector`**: Gathers system state:
-  - OS version and Linux kernel release.
-  - ROCm version (from `/opt/rocm/.info/version` or `rocm-smi`, or `None`).
-  - HIP runtime version and `torch.version.hip` (or `None`).
-  - Critical environment variables (`HSA_OVERRIDE_GFX_VERSION`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`).
-- **`ROCmCapabilities`**: Evaluates hardware constraints based on detected runtime capabilities. Advisory matrix is secondary and versioned; open strings allow new or unlisted hardware.
+- **Separation of Concerns**: Hardware detection functions strictly as an **observation layer**. It observes and reports what is physically and dynamically detected on the system (devices, compute units, memory, ROCm versions, environment flags). It does *not* apply policy, judge compatibility with models, or decide runtime feasibility. Capability evaluation and compatibility verification remain separate future domain components.
+- **`HardwareDetector`**: Queries hardware capabilities dynamically via a prioritized multi-tier fallback:
+  1. PyTorch HIP runtime (`torch.cuda` under ROCm)
+  2. `rocminfo` (HSA agent enumeration)
+  3. `amd-smi` (modern AMD System Management Interface)
+  4. `rocm-smi` (legacy System Management Interface)
+  5. Linux sysfs / KFD topology (`/sys/class/kfd/topology/nodes/`)
+  - Discovers GPU product name (e.g., `AMD Instinct MI300X`, `AMD Radeon RX 7900 XTX`).
+  - Target architecture (`gfx_target: str`, open string discovered dynamically, e.g., `gfx1100`, `gfx942`).
+  - Total and available VRAM, CU count, and PCI bus ID.
+  - Multi-GPU enumeration (`List[HardwareSpec]`).
+  - Non-AMD hosts (macOS, Linux CPU-only, CI) execute cleanly in diagnostic mode (0 GPUs detected, exit code 0, no mock numbers).
+- **`EnvironmentDetector`**: Gathers system environment state:
+  - OS version, kernel release, CPU architecture.
+  - ROCm version (from `/opt/rocm/.info/version`, `rocminfo`, or `rocm-smi`).
+  - HIP runtime version and `torch.version.hip`.
+  - Strict whitelist isolation of ROCm environment variables (`HSA_OVERRIDE_GFX_VERSION`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, etc.) ensuring no sensitive tokens or host secrets are captured.
+- **`DetectionReport`**: Bundles `EnvironmentSpec`, `List[HardwareSpec]`, observation provenance (tracking which detection source yielded data), and non-fatal diagnostic warnings.
 
 ### 3.3 `rocmhub.runners`
 - **`BaseRunner` (Protocol/ABC)**: Defines the common lifecycle:
@@ -257,7 +264,8 @@ sequenceDiagram
     actor User as User / CLI
     participant Source as ModelSource
     participant Insp as ModelInspector
-    participant Env as Hardware & Env Detector
+    participant Env as Hardware & Env Detector (Observation Layer)
+    participant Compat as Capability Evaluator (Future Phase)
     participant Run as Runner (Adapter)
     participant Bench as Benchmark Harness
     participant Art as Artifact Builder
@@ -266,8 +274,9 @@ sequenceDiagram
     Source-->>User: Resolved model files & commit SHA
     Source->>Insp: Inspect model structure
     Insp-->>User: ModelSpec (params, arch, context)
-    User->>Env: Probe AMD GPU & ROCm environment
-    Env-->>User: HardwareSpec & EnvironmentSpec
+    User->>Env: Probe AMD GPU & system environment (Observation)
+    Env-->>User: DetectionReport (HardwareSpec list, EnvironmentSpec)
+    Note over User,Compat: Capability Evaluation (Future): match ModelSpec against HardwareSpec
     User->>Run: Initialize runner (model, precision, device)
     Run-->>User: Ready
     User->>Bench: Execute benchmark (prompt, tokens, warmups)

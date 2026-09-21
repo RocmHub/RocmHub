@@ -6,6 +6,7 @@ from rocmhub.core.errors import ROCmHubError
 from rocmhub.core.types import (
     ArtifactManifest,
     BenchmarkResult,
+    DetectionReport,
     EnvironmentSpec,
     ExecutionStatus,
     ExperimentSpec,
@@ -20,6 +21,7 @@ __all__ = [
     "ModelSpec",
     "HardwareSpec",
     "EnvironmentSpec",
+    "DetectionReport",
     "ExperimentSpec",
     "BenchmarkResult",
     "ArtifactManifest",

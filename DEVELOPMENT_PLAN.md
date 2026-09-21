@@ -103,7 +103,23 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] CLI command: `rocmhub inspect <model_id> [--revision <rev>] [--json]`.
 - **Verification**: Complete offline unit test suite (`tests/test_models.py`, `tests/test_cli.py`) + live network integration test (`tests/test_integration_hf.py`).
 
-### Phase 5: Baseline Runner Adapter
+### Phase 5: Capability / Compatibility Evaluation (COMPLETED)
+- [x] Implement `rocmhub/capabilities/policy.py`:
+  - `CapabilityPolicy` versioned representation separating host observations from interpretation rules.
+  - Known supported architecture sets (CDNA, RDNA) without hardcoding closed enums.
+- [x] Implement `rocmhub/capabilities/evaluator.py`:
+  - `CapabilityEvaluator` linking `ModelSpec` and `DetectionReport` into `CapabilityReport`.
+  - Non-binary verdicts: `READY`, `BLOCKED`, `UNKNOWN`, `NO_ACCELERATOR`.
+  - UNKNOWN never automatically becomes BLOCKED (ensuring unlisted/new AMD GPUs remain UNKNOWN).
+  - Multi-GPU individual device evaluation (`DeviceCapabilityAssessment`).
+  - Conservative capabilities: `amd_gpu_present`, `rocm_detected`, `hip_detected`, `torch_available`, `torch_hip_available`, `model_metadata_complete`, `remote_code_required`, `baseline_runtime_candidate`.
+  - Zero weight downloads, zero inference executions.
+- [x] CLI command: `rocmhub check <model_id> [--revision <rev>] [--json]`:
+  - Human-readable summary table and pure JSON output.
+  - Standardized exit codes: 0 (READY), 2 (NO_ACCELERATOR), 3 (BLOCKED), 4 (UNKNOWN), 1 (Error).
+- **Verification**: 79 tests (unit tests covering READY, NO_ACCELERATOR, ROCm missing, CPU PyTorch, unknown GFX, incomplete metadata, multi-GPU, structured reason codes + live network integration test on macOS).
+
+### Phase 6: Baseline Runner Adapter
 - [ ] Implement `rocmhub/runners/base.py`:
   - Clean abstract protocol: `initialize()`, `warmup()`, `generate_stream()`, `shutdown()`.
 - [ ] Implement `rocmhub/runners/hf_runner.py`:

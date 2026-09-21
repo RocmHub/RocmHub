@@ -46,6 +46,10 @@ class ModelSpec(BaseModel):
     context_length: Optional[int] = Field(default=None, description="Maximum supported context length in tokens")
     default_dtype: Optional[str] = Field(default=None, description="Default model weight precision, e.g. 'bfloat16'")
     weights_format: Optional[str] = Field(default=None, description="Format of weights, e.g. 'safetensors'")
+    remote_code_required: bool = Field(
+        default=False,
+        description="True if model architecture requires executing custom remote repository code",
+    )
 
     @field_validator("commit_sha")
     @classmethod
@@ -96,6 +100,7 @@ class HardwareSpec(BaseModel):
     )
     vram_total_mb: Optional[int] = Field(default=None, description="Total VRAM in megabytes")
     compute_units: Optional[int] = Field(default=None, description="Number of compute units (CU), if reported")
+    bus_id: Optional[str] = Field(default=None, description="PCI bus ID, e.g. '0000:03:00.0'")
 
     @field_validator("vram_total_mb", "compute_units")
     @classmethod
@@ -144,6 +149,86 @@ class DetectionReport(BaseModel):
         default_factory=list,
         description="Non-fatal diagnostic warnings collected during hardware observation",
     )
+
+
+class EvaluationVerdict(str, Enum):
+    """Overall or per-device verdict on whether baseline execution can be attempted."""
+
+    READY = "READY"
+    BLOCKED = "BLOCKED"
+    UNKNOWN = "UNKNOWN"
+    NO_ACCELERATOR = "NO_ACCELERATOR"
+
+
+class EvaluationSeverity(str, Enum):
+    """Severity classification for an evaluation reason."""
+
+    OK = "ok"
+    INFO = "info"
+    WARNING = "warning"
+    BLOCKER = "blocker"
+
+
+class EvaluationReason(BaseModel):
+    """Structured rationale explaining a capability finding."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    code: str = Field(..., description="Machine-readable reason code, e.g. 'NO_AMD_GPU', 'ROCM_DETECTED'")
+    severity: EvaluationSeverity = Field(..., description="Severity: ok, info, warning, blocker")
+    message: str = Field(..., description="Human-readable explanation")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Concrete factual evidence supporting reason")
+
+
+class DeviceCapabilityAssessment(BaseModel):
+    """Capability evaluation outcome for a specific GPU device."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    device_id: Optional[int] = Field(default=None, description="Logical GPU device index")
+    device_name: Optional[str] = Field(default=None, description="Product name of the device")
+    gfx_target: Optional[str] = Field(default=None, description="Discovered target instruction architecture")
+    verdict: EvaluationVerdict = Field(..., description="Verdict for this device: READY, BLOCKED, UNKNOWN, NO_ACCELERATOR")
+    reasons: List[EvaluationReason] = Field(default_factory=list, description="Reasons for this device's verdict")
+    warnings: List[str] = Field(default_factory=list, description="Device-specific non-fatal warnings")
+
+
+class SystemCapabilities(BaseModel):
+    """Conservative capability evaluation flags for baseline assessment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    amd_gpu_present: bool = Field(default=False, description="At least one AMD GPU is detected")
+    rocm_detected: bool = Field(default=False, description="ROCm runtime version detected")
+    hip_detected: bool = Field(default=False, description="HIP runtime version detected")
+    torch_available: bool = Field(default=False, description="PyTorch is importable in the current environment")
+    torch_hip_available: bool = Field(default=False, description="PyTorch has functional HIP backend support")
+    model_metadata_complete: bool = Field(default=False, description="Required model metadata fields are present")
+    remote_code_required: bool = Field(default=False, description="Model requires executing custom remote code")
+    baseline_runtime_candidate: Optional[str] = Field(
+        default=None,
+        description="Candidate runtime adapter for baseline execution attempt, e.g. 'pytorch_transformers_hip'",
+    )
+
+
+class CapabilityReport(BaseModel):
+    """Preflight capability report linking ModelSpec and DetectionReport."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of CapabilityReport")
+    evaluated_at_utc: str = Field(default_factory=_utc_now_iso, description="ISO-8601 UTC timestamp of evaluation")
+    model: ModelSpec = Field(..., description="Model specification evaluated")
+    environment: EnvironmentSpec = Field(..., description="Observed software environment")
+    hardware: List[HardwareSpec] = Field(default_factory=list, description="Observed GPU hardware devices")
+    device_assessments: List[DeviceCapabilityAssessment] = Field(
+        default_factory=list,
+        description="Per-device capability evaluation outcomes",
+    )
+    verdict: EvaluationVerdict = Field(..., description="Top-level system verdict")
+    reasons: List[EvaluationReason] = Field(default_factory=list, description="Top-level evaluation reasons")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings and advisories")
+    capabilities: SystemCapabilities = Field(..., description="Evaluated baseline capabilities")
 
 
 class BenchmarkResult(BaseModel):

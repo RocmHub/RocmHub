@@ -7,8 +7,14 @@ import sys
 from typing import List, Optional
 
 from rocmhub import __version__
+from rocmhub.capabilities import CapabilityEvaluator
 from rocmhub.core.errors import ROCmHubError
-from rocmhub.core.types import DetectionReport, ModelSpec
+from rocmhub.core.types import (
+    CapabilityReport,
+    DetectionReport,
+    EvaluationVerdict,
+    ModelSpec,
+)
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
@@ -59,6 +65,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output ModelSpec as pure JSON on stdout.",
+    )
+
+    # Command: check
+    check_parser = subparsers.add_parser(
+        "check",
+        help="Evaluate baseline execution viability without downloading full weights or running inference.",
+    )
+    check_parser.add_argument(
+        "model_id",
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    check_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    check_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output CapabilityReport as pure JSON on stdout.",
     )
 
     # Command: run
@@ -158,6 +184,55 @@ def _format_model_spec(spec: ModelSpec) -> str:
     return "\n".join(lines)
 
 
+def _format_capability_report(report: CapabilityReport) -> str:
+    """Format CapabilityReport into a clean human-readable summary table."""
+    lines: List[str] = []
+    lines.append("Model:")
+    lines.append(f"  {report.model.model_id}")
+    lines.append(f"  Revision: {report.model.commit_sha}")
+    if report.model.architecture:
+        lines.append(f"  Architecture: {report.model.architecture}")
+    lines.append("")
+
+    lines.append("Environment:")
+    lines.append(f"  ROCm:    {report.environment.rocm_version or 'not detected'}")
+    lines.append(f"  HIP:     {report.environment.hip_version or 'not detected'}")
+    lines.append(f"  PyTorch: {report.environment.torch_version}")
+    lines.append("")
+
+    if not report.hardware:
+        lines.append("Detected GPUs: 0")
+    else:
+        for i, dev in enumerate(report.device_assessments):
+            lines.append(f"GPU {dev.device_id if dev.device_id is not None else i}:")
+            lines.append(f"  {dev.device_name or 'Unknown AMD GPU'}")
+            lines.append(f"  gfx: {dev.gfx_target or 'None'}")
+            if len(report.device_assessments) > 1:
+                lines.append(f"  Verdict: {dev.verdict.value}")
+            lines.append("")
+
+    lines.append("Baseline candidate:")
+    lines.append(f"  {report.capabilities.baseline_runtime_candidate or 'none'}")
+    lines.append("")
+
+    lines.append("Verdict:")
+    lines.append(f"  {report.verdict.value}")
+    lines.append("")
+
+    lines.append("Reasons:")
+    for r in report.reasons:
+        sev_tag = f"[{r.severity.value.upper()}]"
+        lines.append(f"  {sev_tag} {r.code}: {r.message}")
+
+    if report.warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for w in report.warnings:
+            lines.append(f"  - {w}")
+
+    return "\n".join(lines)
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """CLI execution entrypoint."""
     parser = build_parser()
@@ -193,6 +268,41 @@ def main(args: Optional[List[str]] = None) -> int:
             else:
                 sys.stdout.write(_format_model_spec(spec) + "\n")
             return 0
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error: {exc}\n")
+            return 1
+
+    if parsed_args.command == "check":
+        try:
+            source = HuggingFaceModelSource()
+            inspector = ModelInspector(source=source)
+            model_spec = inspector.inspect(
+                model_id=parsed_args.model_id,
+                revision=parsed_args.revision,
+            )
+
+            observer = SystemObserver()
+            detection = observer.observe()
+
+            evaluator = CapabilityEvaluator()
+            capability_report = evaluator.evaluate(model=model_spec, detection=detection)
+
+            if parsed_args.json:
+                sys.stdout.write(capability_report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_capability_report(capability_report) + "\n")
+
+            verdict_exit_codes = {
+                EvaluationVerdict.READY: 0,
+                EvaluationVerdict.NO_ACCELERATOR: 2,
+                EvaluationVerdict.BLOCKED: 3,
+                EvaluationVerdict.UNKNOWN: 4,
+            }
+            return verdict_exit_codes.get(capability_report.verdict, 1)
+
         except ROCmHubError as exc:
             sys.stderr.write(f"Error: {exc}\n")
             return 1

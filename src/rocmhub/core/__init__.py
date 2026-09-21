@@ -21,12 +21,18 @@ from rocmhub.core.errors import (
 from rocmhub.core.types import (
     ArtifactManifest,
     BenchmarkResult,
+    CapabilityReport,
     DetectionReport,
+    DeviceCapabilityAssessment,
     EnvironmentSpec,
+    EvaluationReason,
+    EvaluationSeverity,
+    EvaluationVerdict,
     ExecutionStatus,
     ExperimentSpec,
     HardwareSpec,
     ModelSpec,
+    SystemCapabilities,
 )
 
 __all__ = [
@@ -51,6 +57,12 @@ __all__ = [
     "HardwareSpec",
     "EnvironmentSpec",
     "DetectionReport",
+    "CapabilityReport",
+    "DeviceCapabilityAssessment",
+    "EvaluationReason",
+    "EvaluationSeverity",
+    "EvaluationVerdict",
+    "SystemCapabilities",
     "ExperimentSpec",
     "BenchmarkResult",
     "ArtifactManifest",

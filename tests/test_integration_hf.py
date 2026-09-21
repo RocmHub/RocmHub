@@ -46,3 +46,39 @@ def test_live_hf_inspection_qwen_model() -> None:
     # 7. Verify parameter count (derived from server-side safetensors metadata without downloading weights)
     assert spec.parameter_count is not None
     assert spec.parameter_count > 400_000_000  # ~494M parameters
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_check_qwen_model_on_current_mac(capsys: pytest.CaptureFixture[str]) -> None:
+    """Live integration test: check Qwen2.5-0.5B against real local environment (Mac / diagnostic).
+
+    Expected behavior:
+    - Real Hugging Face inspection succeeds without downloading weights.
+    - Real SystemObserver observes current Mac host.
+    - CapabilityEvaluator evaluates system as NO_ACCELERATOR.
+    - CLI exits with code 2.
+    """
+    import json
+
+    from rocmhub.cli.main import main
+
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    exit_code = main(["check", model_id, "--json"])
+
+    # On macOS Darwin without AMD GPU, exit code must be 2 (NO_ACCELERATOR)
+    assert exit_code == 2
+
+    captured = capsys.readouterr()
+    report_dict = json.loads(captured.out)
+
+    assert report_dict["verdict"] == "NO_ACCELERATOR"
+    assert report_dict["model"]["model_id"] == model_id
+    assert report_dict["model"]["architecture"] == "Qwen2ForCausalLM"
+    assert report_dict["capabilities"]["amd_gpu_present"] is False
+    assert report_dict["capabilities"]["baseline_runtime_candidate"] is None
+
+    reason_codes = [r["code"] for r in report_dict["reasons"]]
+    assert "NO_AMD_GPU" in reason_codes
+    assert "ROCM_NOT_DETECTED" in reason_codes
+

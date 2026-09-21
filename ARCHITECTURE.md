@@ -102,7 +102,20 @@ rocmhub/
   - Strict whitelist isolation of ROCm environment variables (`HSA_OVERRIDE_GFX_VERSION`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, etc.) ensuring no sensitive tokens or host secrets are captured.
 - **`DetectionReport`**: Bundles `EnvironmentSpec`, `List[HardwareSpec]`, observation provenance (tracking which detection source yielded data), and non-fatal diagnostic warnings.
 
-### 3.3 `rocmhub.runners`
+### 3.3 `rocmhub.capabilities`
+- **Separation of Facts from Policy**: Raw observations collected by `SystemObserver` are evaluated against the versioned `CapabilityPolicy`.
+- **`CapabilityEvaluator`**: Performs static preflight evaluation linking `ModelSpec` and `DetectionReport`:
+  - Answers: *"Based on available facts, are there grounds to proceed to baseline execution?"*
+  - **Critical Invariant**: `CapabilityReport` is a **preflight assessment**, **NOT** proof of runtime compatibility. Only an actual subsequent baseline execution run can prove that the model works on the target device.
+  - Zero weight downloads: parses only lightweight configuration and metadata.
+  - Zero inference executions: does not construct tensors or invoke models.
+  - Non-binary verdicts: `READY`, `BLOCKED`, `UNKNOWN`, `NO_ACCELERATOR`.
+  - `UNKNOWN` is **never** automatically converted to `BLOCKED`, preserving support for newly released or unlisted architectures.
+  - Multi-GPU individual device evaluation: assesses each GPU device separately without merging into a virtual entity.
+  - Generates structured `EvaluationReason` items with machine-readable codes, severities (`ok`, `info`, `warning`, `blocker`), and concrete factual evidence.
+- **`CapabilityPolicy`**: Versioned reference defining known upstream architectures and format constraints.
+
+### 3.4 `rocmhub.runners`
 - **`BaseRunner` (Protocol/ABC)**: Defines the common lifecycle:
   - `initialize(model_spec, runtime_config, hardware_spec)`
   - `warmup(sample_input)`
@@ -258,6 +271,21 @@ class ArtifactManifest:
 
 ## 5. Component Pipeline & Sequence
 
+### 5.1 Preflight Capability Evaluation Flow
+
+```
+Model Source ──> Model Inspector ──> ModelSpec ──────────┐
+                                                         ▼
+                                                Capability Evaluator ──> CapabilityReport
+                                                         ▲
+System Observer (Hardware & Env) ──> DetectionReport ───┘
+```
+
+> **Critical Invariant**:
+> `CapabilityReport` is a **preflight assessment** answering whether sufficient prerequisites exist to attempt execution. It is **NOT** a proof or guarantee of runtime compatibility. Only an actual successful baseline execution run can confirm that the model runs correctly on the specified hardware.
+
+### 5.2 End-to-End Sequence
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -265,10 +293,10 @@ sequenceDiagram
     participant Source as ModelSource
     participant Insp as ModelInspector
     participant Env as Hardware & Env Detector (Observation Layer)
-    participant Compat as Capability Evaluator (Future Phase)
-    participant Run as Runner (Adapter)
-    participant Bench as Benchmark Harness
-    participant Art as Artifact Builder
+    participant Eval as Capability Evaluator
+    participant Run as Runner (Adapter - Future)
+    participant Bench as Benchmark Harness (Future)
+    participant Art as Artifact Builder (Future)
 
     User->>Source: Request model (e.g. Qwen2.5-0.5B)
     Source-->>User: Resolved model files & commit SHA
@@ -276,7 +304,9 @@ sequenceDiagram
     Insp-->>User: ModelSpec (params, arch, context)
     User->>Env: Probe AMD GPU & system environment (Observation)
     Env-->>User: DetectionReport (HardwareSpec list, EnvironmentSpec)
-    Note over User,Compat: Capability Evaluation (Future): match ModelSpec against HardwareSpec
+    User->>Eval: Evaluate baseline viability (ModelSpec + DetectionReport)
+    Eval-->>User: CapabilityReport (Verdict: READY/BLOCKED/UNKNOWN/NO_ACCELERATOR)
+    Note over User,Eval: Preflight assessment complete. If READY, baseline execution is permitted.
     User->>Run: Initialize runner (model, precision, device)
     Run-->>User: Ready
     User->>Bench: Execute benchmark (prompt, tokens, warmups)

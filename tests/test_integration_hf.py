@@ -6,6 +6,7 @@ Marked as 'network' and 'integration' so that offline unit test runs exclude it.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -176,3 +177,55 @@ def test_live_validate_qwen_model_on_current_mac_stops_at_preflight(capsys: pyte
         or "preflight" in reasons_text.lower()
         or "skipped" in reasons_text.lower()
     )
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_artifact_build_and_verify_qwen_model_on_current_mac(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Live integration test: rocmhub artifact build & verify for Qwen2.5-0.5B on Mac.
+
+    Verifies:
+    - Real Hugging Face Hub metadata is fetched (40-char commit SHA resolved).
+    - Real SystemObserver observes Mac host (no AMD GPU).
+    - Preflight evaluation produces NO_ACCELERATOR.
+    - Zero weights are downloaded, zero inference executed.
+    - Artifact bundle is saved with status COMPLETE.
+    - rocmhub artifact verify validates bundle integrity (valid=True).
+    """
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    out_dir = tmp_path / "artifacts"
+    exit_code = main(["artifact", "build", model_id, "--output-dir", str(out_dir), "--json"])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    manifest_data = json.loads(captured.out)
+
+    assert manifest_data["status"] == "COMPLETE"
+    assert manifest_data["capability_verdict"] == "NO_ACCELERATOR"
+    assert manifest_data["execution_status"] == "SKIPPED"
+    assert manifest_data["benchmark_status"] == "SKIPPED"
+    assert manifest_data["validation_verdict"] == "NOT_MEASURED"
+    assert manifest_data["model"]["model_id"] == model_id
+    assert len(manifest_data["model"]["immutable_revision"]) == 40
+    assert "model.json" in manifest_data["files"]
+    assert "checksums.json" not in manifest_data["files"]
+    assert "manifest.json" not in manifest_data["files"]
+
+    created_dirs = list(out_dir.iterdir())
+    assert len(created_dirs) == 1
+    artifact_dir = created_dirs[0]
+
+    # Verify the created artifact bundle using CLI verify command
+    verify_code = main(["artifact", "verify", str(artifact_dir), "--json"])
+    assert verify_code == 0
+
+    verify_captured = capsys.readouterr()
+    verify_data = json.loads(verify_captured.out)
+    assert verify_data["valid"] is True
+    assert verify_data["manifest_valid"] is True
+    assert verify_data["checksums_valid"] is True
+    assert len(verify_data["missing_files"]) == 0
+    assert len(verify_data["modified_files"]) == 0
+    assert len(verify_data["unexpected_files"]) == 0

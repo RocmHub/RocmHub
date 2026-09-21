@@ -171,10 +171,34 @@ class QualityGateFailedError(ValidationError):
     error_code = "QUALITY_GATE_FAILED"
 
 
-class ArtifactPackagingError(ROCmHubError):
+class ArtifactError(ROCmHubError):
+    """Base exception for artifact builder, store, and integrity failures."""
+
+    error_code = "ARTIFACT_ERROR"
+
+
+class ArtifactPackagingError(ArtifactError):
     """Raised when artifact manifest, packaging, or checksum validation fails."""
 
     error_code = "ARTIFACT_PACKAGING_ERROR"
+
+
+class ArtifactConflictError(ArtifactError):
+    """Raised when an artifact already exists and contents differ (preventing silent overwrite)."""
+
+    error_code = "ARTIFACT_CONFLICT"
+
+
+class ArtifactIntegrityError(ArtifactError):
+    """Raised when an artifact bundle fails checksum or completeness verification."""
+
+    error_code = "ARTIFACT_INTEGRITY_FAILED"
+
+
+class SecretDetectedError(ArtifactError):
+    """Raised when a secret, credential, or sensitive token is detected in artifact payload."""
+
+    error_code = "SECRET_DETECTED"
 
 
 class NotImplementedFeatureError(ROCmHubError):

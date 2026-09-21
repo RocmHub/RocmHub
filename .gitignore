@@ -51,6 +51,6 @@ htmlcov/
 .DS_Store
 
 # ROCmHub local artifacts & cache
-artifacts/
+/artifacts/
 .cache/
 *.log

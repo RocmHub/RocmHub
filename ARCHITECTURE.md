@@ -158,44 +158,44 @@ rocmhub/
 ## 4. Minimal Data Models
 
 ```
-                               ┌───────────────────┐
-                               │   ExperimentSpec  │
-                               └─────────┬─────────┘
-                                         │
-                 ┌───────────────────────┼───────────────────────┐
-                 │                       │                       │
-                 ▼                       ▼                       ▼
-       ┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
-       │     ModelSpec     │   │    HardwareSpec   │   │  EnvironmentSpec  │
-       └───────────────────┘   └───────────────────┘   └───────────────────┘
-                 │                       │                       │
-                 └───────────────────────┼───────────────────────┘
-                                         │
-                            ┌────────────┴───────────┐
-                            │                        │
-                            ▼                        ▼
-                  ┌───────────────────┐   ┌────────────────────┐
-                  │  BenchmarkResult  │   │  ValidationReport  │
-                  │  (Performance     │   │  (Correctness &    │
-                  │   Gate — TTFT,    │   │   Quality Gate —   │
-                  │   ITL, VRAM,      │   │   QRR, Verdict,    │
-                  │   Throughput)     │   │   Case Results)    │
-                  └────────┬──────────┘   └────────┬───────────┘
-                           │                       │
-                           │  ← Both gates must    │
-                           │    pass independently │
-                           └───────────┬───────────┘
-                                       │
-                                       ▼
-                             ┌───────────────────┐
-                             │  ArtifactManifest │
-                             └───────────────────┘
+Model Source ──> Model Inspector ──> ModelSpec
+                       │
+System Observer  ──> DetectionReport
+                       │
+Capability Evaluator ──> CapabilityReport
+                       │
+                       ▼
+            Execution Adapters
+             ├── Benchmark Harness   ──> BenchmarkResult  (Performance Gate)
+             └── Validation Evaluator ──> ValidationReport (Quality Gate)
+                       │
+                       ▼
+                Artifact Builder
+                       │
+                       ▼
+          Immutable Evidence Bundle (artifacts/<artifact_id>/)
+           ├── manifest.json
+           ├── checksums.json
+           ├── model.json
+           ├── environment.json
+           ├── capabilities.json
+           ├── run.json
+           ├── benchmark.json
+           ├── benchmark_raw.json (optional)
+           ├── validation.json
+           └── reproduce.json
 ```
 
-> **Dual-gate invariant**: `BenchmarkResult.SUCCESS` ≠ `ROCmHub Verified`.
-> A fast model that generates corrupted or regressed output is **REJECTED**.
-> Performance Gate (TTFT, ITL, throughput, VRAM) and Quality Gate (correctness,
-> QRR) are **strictly independent** — no combined scores, no shared evaluators.
+> [!IMPORTANT]
+> **Four Strictly Distinct Concepts**:
+> 1. **Artifact COMPLETE**: The evidence bundle is structurally complete, all phase outputs are recorded, and cryptographic checksums match.
+> 2. **Execution SUCCESS**: The runtime inference executed without exceptions or crashes.
+> 3. **Validation PASS**: Model output passed all hard correctness gates (token validity, non-corruption) and met quality retention thresholds.
+> 4. **ROCmHub Verified**: Platform-level certification (planned for a future phase).
+>
+> $$\text{Artifact COMPLETE} \ne \text{Execution SUCCESS} \ne \text{Validation PASS} \ne \text{ROCmHub Verified}$$
+>
+> An experiment on macOS without an AMD GPU produces a **COMPLETE** diagnostic artifact capturing `NO_ACCELERATOR`, `Run SKIPPED`, `Benchmark SKIPPED`, and `Validation NOT_MEASURED` without downloading weights or claiming verification.
 
 
 ### 4.1 `ExecutionStatus`
@@ -338,15 +338,50 @@ class ValidationReport:
 
 ### 4.9 `ArtifactManifest`
 ```python
+class ArtifactStatus(str, Enum):
+    COMPLETE = "COMPLETE"        # Bundle structurally complete, all phase outputs recorded
+    INCOMPLETE = "INCOMPLETE"    # Bundle compilation unfinished
+    INVALID = "INVALID"          # Bundle corrupted or failed verification
+
+class ArtifactFileEntry:
+    path: str                    # e.g. "model.json"
+    sha256: str                  # Cryptographic SHA-256 of canonical bytes
+    size_bytes: int              # Exact file size on disk
+
 class ArtifactManifest:
     schema_version: str = "1.0.0"
-    manifest_id: str                # e.g. "rocmhub-art-20260921-001"
-    created_at_utc: str             # ISO-8601 UTC timestamp
-    experiment: ExperimentSpec
-    result: BenchmarkResult
-    reproduce_command: str          # e.g. "rocmhub run --model ... --precision ..."
-    manifest_checksum: str          # SHA256 of canonical JSON content
+    artifact_id: str             # Deterministic content-derived ID: 'art-<sha256[:24]>'
+    experiment_id: str           # Deterministic experiment config ID: 'exp-<sha256[:24]>'
+    status: ArtifactStatus       # COMPLETE | INCOMPLETE | INVALID
+    created_at_utc: str          # ISO-8601 UTC timestamp
+
+    # Component summaries
+    model: dict[str, Any]
+    hardware: dict[str, Any]
+    environment: dict[str, Any]
+
+    # Execution parameters & outcomes
+    runtime: str                 # e.g. "pytorch_transformers_hip"
+    precision: str               # e.g. "fp16"
+    capability_verdict: EvaluationVerdict
+    execution_status: ExecutionStatus
+    benchmark_status: ExecutionStatus
+    validation_verdict: ValidationVerdict
+
+    # File inventory (relative path -> ArtifactFileEntry)
+    files: dict[str, ArtifactFileEntry]
+
+    # Reproduction metadata
+    reproduction: dict[str, Any]
+
+    manifest_checksum: str | None # Detached SHA-256 checksum in canonical format
 ```
+
+**Artifact Manifest Invariants:**
+- `artifact_id` is content-derived from `experiment_id` + canonical hashes of payload files.
+- `experiment_id` is derived from canonical experiment parameters (model, revision, hardware, precision, benchmark/validation config).
+- `checksums.json` provides detached integrity verification for all files, including `manifest.json`.
+- Strict prohibition of premature certification fields: any `verified` or `certified` field is rejected by Pydantic validators.
 
 
 ---

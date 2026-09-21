@@ -44,6 +44,14 @@ class ValidationMode(str, Enum):
     COMPARISON = "COMPARISON"
 
 
+class ArtifactStatus(str, Enum):
+    """Integrity and completeness status of a materialized artifact bundle."""
+
+    COMPLETE = "COMPLETE"
+    INCOMPLETE = "INCOMPLETE"
+    INVALID = "INVALID"
+
+
 class ModelSpec(BaseModel):
     """Specification of the AI model under test."""
 
@@ -521,31 +529,153 @@ class ValidationReport(BaseModel):
         return self
 
 
+class ArtifactFileEntry(BaseModel):
+    """Inventory entry representing an individual file contained in an artifact bundle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str = Field(..., description="Relative file path within the artifact bundle, e.g. 'model.json'")
+    sha256: str = Field(..., description="SHA-256 hex digest of the canonical file content")
+    size_bytes: int = Field(..., description="File size in bytes")
+
+
+class ReproductionMetadata(BaseModel):
+    """Declarative parameters and specifications required to reproduce the experiment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of ReproductionMetadata")
+    model_id: str = Field(..., description="Target model identifier")
+    requested_revision: str = Field(default="main", description="Requested model revision")
+    immutable_revision: str = Field(..., description="Immutable resolved Git commit SHA")
+    runtime: str = Field(..., description="Execution runtime adapter identifier")
+    precision: str = Field(..., description="Inference precision (e.g. 'fp16', 'bf16', 'fp32')")
+    device_requirements: Dict[str, Any] = Field(default_factory=dict, description="Target device parameters")
+    benchmark_config: Dict[str, Any] = Field(default_factory=dict, description="Benchmark workload configuration")
+    validation_config: Dict[str, Any] = Field(default_factory=dict, description="Validation suite configuration")
+    environment_requirements: Dict[str, Any] = Field(default_factory=dict, description="Environment constraints")
+
+
+class ArtifactVerificationResult(BaseModel):
+    """Detailed outcome of artifact bundle integrity and manifest verification."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of ArtifactVerificationResult")
+    valid: bool = Field(..., description="True if artifact bundle is completely intact, unaltered, and valid")
+    artifact_id: str = Field(..., description="Artifact identifier under verification")
+    manifest_valid: bool = Field(..., description="True if manifest.json is present, parses cleanly, and passes schema validation")
+    checksums_valid: bool = Field(..., description="True if checksums.json matches all file hashes including manifest.json")
+    missing_files: List[str] = Field(default_factory=list, description="Files declared in inventory but missing from disk")
+    modified_files: List[str] = Field(default_factory=list, description="Files whose computed SHA-256 does not match declared checksum")
+    unexpected_files: List[str] = Field(default_factory=list, description="Files present on disk but not declared in inventory")
+    errors: List[str] = Field(default_factory=list, description="Descriptive error messages explaining failure reasons")
+
+
 class ArtifactManifest(BaseModel):
-    """Top-level reproducible artifact manifest bundling experiment inputs and benchmark results."""
+    """Top-level reproducible artifact manifest bundling experiment inputs, evidence, and verification inventories."""
 
     model_config = ConfigDict(extra="forbid", frozen=False)
 
     schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of ArtifactManifest")
-    manifest_id: str = Field(..., description="Artifact manifest identifier")
+    artifact_id: str = Field(..., description="Content-derived unique artifact identifier")
+    experiment_id: str = Field(..., description="Deterministic canonical identity of the experiment configuration")
+    status: ArtifactStatus = Field(default=ArtifactStatus.COMPLETE, description="Structural completeness status of bundle")
     created_at_utc: str = Field(
         default_factory=_utc_now_iso,
         description="Creation timestamp in UTC (ISO-8601)",
     )
-    experiment: ExperimentSpec = Field(..., description="Experiment specification and provenance")
-    result: BenchmarkResult = Field(..., description="Benchmark results and execution status")
-    reproduce_command: str = Field(..., description="Command to reproduce this run")
+
+    # Component summaries
+    model: Dict[str, Any] = Field(default_factory=dict, description="Model provenance summary")
+    hardware: Dict[str, Any] = Field(default_factory=dict, description="Hardware summary")
+    environment: Dict[str, Any] = Field(default_factory=dict, description="Software environment summary")
+
+    # Execution parameters & outcomes
+    runtime: str = Field(default="pytorch_transformers_hip", description="Runtime adapter identifier")
+    precision: str = Field(default="fp16", description="Floating-point precision")
+
+    capability_verdict: EvaluationVerdict = Field(default=EvaluationVerdict.NO_ACCELERATOR, description="Preflight capability evaluation verdict")
+    execution_status: ExecutionStatus = Field(default=ExecutionStatus.SKIPPED, description="Baseline execution status")
+    benchmark_status: ExecutionStatus = Field(default=ExecutionStatus.SKIPPED, description="Benchmark execution status")
+    validation_verdict: ValidationVerdict = Field(default=ValidationVerdict.NOT_MEASURED, description="Validation suite verdict")
+
+    # Inventory of constituent bundle files (path -> ArtifactFileEntry)
+    files: Dict[str, ArtifactFileEntry] = Field(default_factory=dict, description="Inventory mapping relative paths to file checksums and sizes")
+
+    # Reproduction reference / parameters
+    reproduction: Dict[str, Any] = Field(default_factory=dict, description="Reproduction specification summary")
+
     manifest_checksum: Optional[str] = Field(
         default=None,
-        description="SHA256 checksum of canonical manifest JSON content (excluding manifest_checksum field)",
+        description="Detached SHA256 checksum of canonical manifest JSON content (excluding manifest_checksum field)",
     )
+
+    # Legacy fields for backward compatibility with early unit tests
+    experiment: Optional[ExperimentSpec] = Field(
+        default=None,
+        description="Legacy experiment spec field (optional)",
+    )
+    result: Optional[BenchmarkResult] = Field(
+        default=None,
+        description="Legacy benchmark result field (optional)",
+    )
+    reproduce_command: Optional[str] = Field(
+        default=None,
+        description="Optional shell command string to reproduce this run",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Legacy alias for artifact_id",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "artifact_id" not in data and "manifest_id" in data:
+                data["artifact_id"] = data["manifest_id"]
+            elif "manifest_id" not in data and "artifact_id" in data:
+                data["manifest_id"] = data["artifact_id"]
+            if "experiment_id" not in data:
+                if "experiment" in data and isinstance(data["experiment"], (dict, ExperimentSpec)):
+                    exp_id = (
+                        data["experiment"].experiment_id
+                        if isinstance(data["experiment"], ExperimentSpec)
+                        else data["experiment"].get("experiment_id", "exp-legacy")
+                    )
+                    data["experiment_id"] = exp_id
+                else:
+                    data["experiment_id"] = "exp-default"
+            if "experiment" in data and isinstance(data["experiment"], (dict, ExperimentSpec)):
+                exp = data["experiment"]
+                if isinstance(exp, ExperimentSpec):
+                    if not data.get("model"):
+                        data["model"] = exp.model.model_dump(mode="json")
+                    if not data.get("runtime"):
+                        data["runtime"] = exp.runtime_name
+                    if not data.get("precision"):
+                        data["precision"] = exp.precision
+            if "result" in data and isinstance(data["result"], (dict, BenchmarkResult)):
+                res = data["result"]
+                if isinstance(res, BenchmarkResult):
+                    if "benchmark_status" not in data:
+                        data["benchmark_status"] = res.status
+        return data
+
+    @model_validator(mode="after")
+    def validate_no_premature_certification(self) -> ArtifactManifest:
+        """Enforce that artifact never claims certification or verification."""
+        forbidden_keys = {"verified", "certified", "rocmhub_verified", "badge"}
+        for k in forbidden_keys:
+            if k in self.__dict__:
+                raise ValueError(f"Prohibited certification field '{k}' found in ArtifactManifest.")
+        return self
 
     def compute_canonical_checksum(self) -> str:
         """Compute the SHA256 checksum of this manifest in canonical JSON format, excluding manifest_checksum."""
-        # Convert to dictionary and exclude manifest_checksum
         data = self.model_dump(mode="json")
         data.pop("manifest_checksum", None)
-        # Produce canonical deterministic JSON string with sorted keys
         canonical_json = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 

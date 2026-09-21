@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Any, List, Optional
 
 from rocmhub import __version__
+from rocmhub.artifacts import ArtifactBuilder, LocalArtifactStore
 from rocmhub.benchmarks import BenchmarkConfig, BenchmarkHarness
 from rocmhub.capabilities import CapabilityEvaluator
 from rocmhub.core.errors import ROCmHubError
 from rocmhub.core.types import (
+    ArtifactManifest,
+    ArtifactVerificationResult,
     BenchmarkResult,
     CapabilityReport,
     DetectionReport,
@@ -261,6 +265,76 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output ValidationReport as pure JSON on stdout.",
+    )
+
+    # Command: artifact
+    artifact_parser = subparsers.add_parser(
+        "artifact",
+        help="Manage, build, and verify reproducible artifact bundles.",
+    )
+    artifact_subparsers = artifact_parser.add_subparsers(
+        dest="artifact_action",
+        help="Artifact action to perform",
+    )
+
+    # Action: artifact build
+    build_artifact_parser = artifact_subparsers.add_parser(
+        "build",
+        help="Run pipeline stages and compile an immutable reproducible artifact bundle.",
+    )
+    build_artifact_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    build_artifact_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    build_artifact_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    build_artifact_parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="Target accelerator device index (default: 0).",
+    )
+    build_artifact_parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Inference precision (default: 'fp16').",
+    )
+    build_artifact_parser.add_argument(
+        "--output-dir",
+        default="artifacts",
+        help="Directory to store compiled artifact bundles (default: 'artifacts').",
+    )
+    build_artifact_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ArtifactManifest as pure JSON on stdout.",
+    )
+
+    # Action: artifact verify
+    verify_artifact_parser = artifact_subparsers.add_parser(
+        "verify",
+        help="Verify cryptographic integrity, file inventory, and checksums of an artifact bundle.",
+    )
+    verify_artifact_parser.add_argument(
+        "path",
+        help="Filesystem path to the artifact bundle directory.",
+    )
+    verify_artifact_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ArtifactVerificationResult as pure JSON on stdout.",
     )
 
     return parser
@@ -517,7 +591,63 @@ def _format_validation_report(report: ValidationReport) -> str:
     return "\n".join(lines)
 
 
+def _format_artifact_manifest(manifest: ArtifactManifest, path: Path | str) -> str:
+    """Format ArtifactManifest into a clean human-readable summary table."""
+    lines = [
+        f"{'Artifact Bundle:':<24} {manifest.artifact_id}",
+        f"{'Experiment ID:':<24} {manifest.experiment_id}",
+        f"{'Status:':<24} {manifest.status.value}",
+        f"{'Location:':<24} {path}",
+        "",
+        f"{'Model:':<24} {manifest.model.get('model_id', 'unknown')}",
+        f"{'Revision:':<24} {manifest.model.get('immutable_revision', 'unknown')[:12]}...",
+        f"{'Runtime:':<24} {manifest.runtime} ({manifest.precision})",
+        "",
+        f"{'Capability Verdict:':<24} {manifest.capability_verdict.value}",
+        f"{'Execution Status:':<24} {manifest.execution_status.value}",
+        f"{'Benchmark Status:':<24} {manifest.benchmark_status.value}",
+        f"{'Validation Verdict:':<24} {manifest.validation_verdict.value}",
+        "",
+        "Files Inventory:",
+    ]
+    for rel_path, entry in sorted(manifest.files.items()):
+        sha_short = entry.sha256[:12]
+        lines.append(f"  {rel_path:<22} {entry.size_bytes:>8} B  (sha256: {sha_short}...)")
 
+    return "\n".join(lines)
+
+
+def _format_verification_result(res: ArtifactVerificationResult) -> str:
+    """Format ArtifactVerificationResult into a clean human-readable summary table."""
+    status_str = "VALID" if res.valid else "INVALID / TAMPERED"
+    lines = [
+        f"{'Verification:':<24} {status_str}",
+        f"{'Artifact ID:':<24} {res.artifact_id}",
+        f"{'Manifest Valid:':<24} {'yes' if res.manifest_valid else 'NO'}",
+        f"{'Checksums Valid:':<24} {'yes' if res.checksums_valid else 'NO'}",
+    ]
+
+    if res.missing_files:
+        lines.extend(["", "Missing Files:"])
+        for f in res.missing_files:
+            lines.append(f"  - {f}")
+
+    if res.modified_files:
+        lines.extend(["", "Modified / Corrupted Files:"])
+        for f in res.modified_files:
+            lines.append(f"  - {f}")
+
+    if res.unexpected_files:
+        lines.extend(["", "Unexpected Undeclared Files:"])
+        for f in res.unexpected_files:
+            lines.append(f"  - {f}")
+
+    if res.errors:
+        lines.extend(["", "Errors:"])
+        for err in res.errors:
+            lines.append(f"  - {err}")
+
+    return "\n".join(lines)
 
 
 def main(args: Optional[List[str]] = None) -> int:
@@ -891,6 +1021,178 @@ def main(args: Optional[List[str]] = None) -> int:
         except Exception as exc:
             sys.stderr.write(f"Unexpected error: {exc}\n")
             return 1
+
+    if parsed_args.command == "artifact":
+        if not getattr(parsed_args, "artifact_action", None):
+            sys.stderr.write("Error: Subcommand required ('build' or 'verify'). Run 'rocmhub artifact --help'.\n")
+            return 1
+
+        if parsed_args.artifact_action == "verify":
+            try:
+                store = LocalArtifactStore()
+                res = store.verify_artifact(parsed_args.path)
+                if parsed_args.json:
+                    sys.stdout.write(res.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_verification_result(res) + "\n")
+                return 0 if res.valid else 1
+            except Exception as exc:
+                sys.stderr.write(f"Verification error: {exc}\n")
+                return 1
+
+        if parsed_args.artifact_action == "build":
+            target_model_id = parsed_args.model_id or parsed_args.model_opt
+            if not target_model_id:
+                sys.stderr.write("Error: model_id must be provided to 'rocmhub artifact build'.\n")
+                return 1
+
+            try:
+                # 1. Inspect model metadata (resolves immutable commit SHA without downloading weights)
+                source = HuggingFaceModelSource()
+                inspector = ModelInspector(source=source)
+                model_spec = inspector.inspect(
+                    model_id=target_model_id,
+                    revision=parsed_args.revision,
+                )
+
+                # 2. Observe system hardware and runtime environment
+                observer = SystemObserver()
+                detection = observer.observe()
+
+                # 3. Preflight capability evaluation
+                evaluator = CapabilityEvaluator()
+                capability_report = evaluator.evaluate(model=model_spec, detection=detection)
+
+                store = LocalArtifactStore(root_dir=parsed_args.output_dir)
+                builder = ArtifactBuilder(store=store)
+
+                if capability_report.verdict != EvaluationVerdict.READY:
+                    # Preflight check failed: construct honest diagnostic execution outcomes
+                    # Zero weights are downloaded, zero GPU inference executed.
+                    run_result = RunResult(
+                        status=ExecutionStatus.SKIPPED,
+                        runtime_name="pytorch_transformers_hip",
+                        model_id=model_spec.model_id,
+                        model_revision=model_spec.commit_sha,
+                        device_id=parsed_args.device,
+                        precision=parsed_args.precision,
+                        prompt="Hello, ROCmHub diagnostic run",
+                        generated_text=None,
+                        input_tokens=None,
+                        generated_tokens=None,
+                        error=f"Execution skipped: preflight verdict is {capability_report.verdict.value}.",
+                        generation_params={"max_new_tokens": 16, "do_sample": False},
+                    )
+
+                    benchmark_result = BenchmarkResult(
+                        status=ExecutionStatus.SKIPPED,
+                        error_message=f"Benchmark skipped: preflight verdict is {capability_report.verdict.value}.",
+                        model_id=model_spec.model_id,
+                        model_revision=model_spec.commit_sha,
+                        device_id=parsed_args.device,
+                        runtime_name="pytorch_transformers_hip",
+                        precision=parsed_args.precision,
+                        warmup_runs=2,
+                        measurement_runs_requested=5,
+                        measurement_runs_completed=0,
+                        failed_runs=0,
+                    )
+
+                    validation_report = ValidationReport(
+                        mode=ValidationMode.SELF_VALIDATION,
+                        model_id=model_spec.model_id,
+                        baseline_revision=model_spec.commit_sha,
+                        candidate_revision=None,
+                        verdict=ValidationVerdict.NOT_MEASURED,
+                        correctness_passed=None,
+                        quality_measured=False,
+                        qrr_percent=None,
+                        cases_total=len(DEFAULT_VALIDATION_CASES),
+                        cases_completed=0,
+                        cases_failed=0,
+                        critical_cases_failed=0,
+                        case_results=[],
+                        reasons=[
+                            f"Validation skipped: preflight verdict is {capability_report.verdict.value}."
+                        ],
+                    )
+
+                    manifest, final_path = builder.build(
+                        model=model_spec,
+                        detection=detection,
+                        capability=capability_report,
+                        run=run_result,
+                        benchmark=benchmark_result,
+                        validation=validation_report,
+                        device_id=parsed_args.device,
+                        precision=parsed_args.precision,
+                    )
+
+                    if parsed_args.json:
+                        sys.stdout.write(manifest.model_dump_json(indent=2) + "\n")
+                    else:
+                        sys.stdout.write(_format_artifact_manifest(manifest, final_path) + "\n")
+                    return 0
+
+                # Preflight check is READY: execute full inference pipeline
+                runner = HuggingFaceRunner()
+                try:
+                    runner.load(
+                        model=model_spec,
+                        device_id=parsed_args.device,
+                        precision=parsed_args.precision,
+                    )
+                    run_result = runner.generate(
+                        prompt="Hello, ROCmHub execution!",
+                        max_new_tokens=16,
+                    )
+
+                    bench_config = BenchmarkConfig(
+                        prompt="Hello, ROCmHub benchmark!",
+                        max_new_tokens=16,
+                        warmup_runs=2,
+                        measurement_runs=5,
+                        precision=parsed_args.precision,
+                        device_id=parsed_args.device,
+                    )
+                    harness = BenchmarkHarness(runner=runner, config=bench_config)
+                    benchmark_result = harness.run(model=model_spec)
+
+                    val_config = ValidationConfig(
+                        cases=DEFAULT_VALIDATION_CASES,
+                        max_new_tokens=16,
+                    )
+                    val_evaluator = ValidationEvaluator(config=val_config)
+                    validation_report = val_evaluator.run_self_validation(
+                        runner=runner,
+                        model=model_spec,
+                    )
+
+                    manifest, final_path = builder.build(
+                        model=model_spec,
+                        detection=detection,
+                        capability=capability_report,
+                        run=run_result,
+                        benchmark=benchmark_result,
+                        validation=validation_report,
+                        device_id=parsed_args.device,
+                        precision=parsed_args.precision,
+                    )
+
+                    if parsed_args.json:
+                        sys.stdout.write(manifest.model_dump_json(indent=2) + "\n")
+                    else:
+                        sys.stdout.write(_format_artifact_manifest(manifest, final_path) + "\n")
+                    return 0
+                finally:
+                    runner.unload()
+
+            except ROCmHubError as exc:
+                sys.stderr.write(f"Error: {exc}\n")
+                return 1
+            except Exception as exc:
+                sys.stderr.write(f"Unexpected error: {exc}\n")
+                return 1
 
     return 0
 

@@ -1,6 +1,9 @@
 """Core domain models and exceptions for ROCmHub."""
 
 from rocmhub.core.errors import (
+    ArtifactConflictError,
+    ArtifactError,
+    ArtifactIntegrityError,
     ArtifactPackagingError,
     AuthRequiredError,
     BenchmarkError,
@@ -26,12 +29,16 @@ from rocmhub.core.errors import (
     RunnerExecutionError,
     RunnerNotReadyError,
     SchemaValidationError,
+    SecretDetectedError,
     UnsupportedModelTypeError,
     UnsupportedPrecisionError,
     ValidationError,
 )
 from rocmhub.core.types import (
+    ArtifactFileEntry,
     ArtifactManifest,
+    ArtifactStatus,
+    ArtifactVerificationResult,
     BenchmarkResult,
     CapabilityReport,
     DetectionReport,
@@ -44,6 +51,7 @@ from rocmhub.core.types import (
     ExperimentSpec,
     HardwareSpec,
     ModelSpec,
+    ReproductionMetadata,
     RunResult,
     SystemCapabilities,
     ValidationCase,
@@ -80,7 +88,11 @@ __all__ = [
     "InvalidValidationConfigError",
     "CorrectnessGateFailedError",
     "QualityGateFailedError",
+    "ArtifactError",
     "ArtifactPackagingError",
+    "ArtifactConflictError",
+    "ArtifactIntegrityError",
+    "SecretDetectedError",
     "NotImplementedFeatureError",
     "ExecutionStatus",
     "ModelSpec",
@@ -101,5 +113,9 @@ __all__ = [
     "ValidationCase",
     "ValidationRunResult",
     "ValidationReport",
+    "ArtifactStatus",
+    "ArtifactFileEntry",
+    "ReproductionMetadata",
+    "ArtifactVerificationResult",
     "ArtifactManifest",
 ]

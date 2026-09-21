@@ -189,16 +189,30 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - **Validation Independence**: `ValidationEvaluator` is completely decoupled from `BenchmarkHarness` — no shared state, no combined scores.
 - **Verification**: 201 offline tests (88 new validation tests + 113 regression-free existing tests) + 5 live network integration tests.
 
-### Phase 8: Artifact Builder & Manifest Generator
-- [ ] Implement `rocmhub/artifacts/builder.py`:
-  - Creates artifact directory: `artifacts/<model_slug>_<timestamp>/`.
-  - Writes:
-    - `manifest.json`: Full specification matching `ArtifactManifest`.
-    - `metrics.json`: Detailed percentile latency and memory data.
-    - `environment.json`: Host and ROCm specs.
-    - `reproduce.sh`: Executable script with exact command and environment variables.
-  - Computes manifest SHA256 checksum for tamper evidence.
-- **Verification**: Validates created directory layout and verifies manifest JSON matches schema.
+### Phase 8: Reproducible Artifact Builder (COMPLETED)
+- [x] Implement `rocmhub/artifacts/integrity.py`:
+  - Canonical JSON serialization (`sort_keys=True`, compact stable separators `","`, `":"`, strict `allow_nan=False`, UTF-8).
+  - Cryptographic hashing: `compute_sha256()` and `compute_file_sha256()`.
+  - Fail-closed secret scanner `scan_for_secrets()` rejecting credentials, passwords, private keys, and tokens while explicitly whitelisting legitimate token counts (`generated_tokens`, `input_tokens`, `max_new_tokens`, `tokens_per_sec`).
+- [x] Implement `rocmhub/artifacts/manifest.py`:
+  - Deterministic `experiment_id`: `exp-<sha256[:24]>` derived from input experiment configuration (model, immutable commit SHA, hardware, precision, benchmark params, validation config).
+  - Deterministic `artifact_id`: `art-<sha256[:24]>` derived from `experiment_id` + canonical payload file hashes.
+  - Declarative `ReproductionMetadata` (reproduce.json).
+  - `build_manifest()`: Top-level `ArtifactManifest` recording file inventory and detached checksums.
+- [x] Implement `rocmhub/artifacts/storage.py`:
+  - `LocalArtifactStore`: Atomic directory commit (POSIX rename/replace on same filesystem).
+  - Prevention of silent overwrite via `ArtifactConflictError`.
+  - Comprehensive tamper verification `verify_artifact()`: checks schema, inventory, missing files, modified files, and unexpected files.
+- [x] Implement `rocmhub/artifacts/builder.py`:
+  - `ArtifactBuilder`: Orchestrates staging, secret scanning, canonical file writes, per-file hashing, manifest assembly, detached checksum generation, and atomic publication.
+  - Separate raw benchmark data storage (`benchmark_raw.json`).
+  - Automatic cleanup of staging directory on failure (leaves no corrupted final artifact).
+  - Faithful diagnostic artifact mode: marked `COMPLETE` with preserved `NO_ACCELERATOR`, `SKIPPED`, `NOT_MEASURED` without downloading model weights.
+- [x] Implement CLI commands:
+  - `rocmhub artifact build <model_id> [--revision] [--device] [--precision] [--output-dir] [--json]`
+  - `rocmhub artifact verify <path> [--json]`
+- **Core Invariant**: $\text{Artifact COMPLETE} \ne \text{Execution SUCCESS} \ne \text{Validation PASS} \ne \text{ROCmHub Verified}$.
+- **Verification**: 228 offline unit tests + 6 live network integration tests. Ruff clean. Mypy clean.
 
 ### Phase 9: CLI Entrypoint & End-to-End Slice
 - [ ] Full end-to-end slice on real AMD ROCm hardware:

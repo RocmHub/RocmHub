@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from rocmhub.artifacts import ArtifactBuilder, LocalArtifactStore
 from rocmhub.benchmarks import (
     BenchmarkConfig,
     BenchmarkHarness,
@@ -11,7 +12,10 @@ from rocmhub.benchmarks import (
 from rocmhub.capabilities import CapabilityEvaluator, CapabilityPolicy
 from rocmhub.core.errors import ROCmHubError
 from rocmhub.core.types import (
+    ArtifactFileEntry,
     ArtifactManifest,
+    ArtifactStatus,
+    ArtifactVerificationResult,
     BenchmarkResult,
     CapabilityReport,
     DetectionReport,
@@ -24,6 +28,7 @@ from rocmhub.core.types import (
     ExperimentSpec,
     HardwareSpec,
     ModelSpec,
+    ReproductionMetadata,
     RunResult,
     SystemCapabilities,
     ValidationCase,
@@ -67,5 +72,11 @@ __all__ = [
     "ValidationMode",
     "ValidationCase",
     "ValidationRunResult",
+    "ArtifactStatus",
+    "ArtifactFileEntry",
+    "ReproductionMetadata",
+    "ArtifactVerificationResult",
     "ArtifactManifest",
+    "ArtifactBuilder",
+    "LocalArtifactStore",
 ]

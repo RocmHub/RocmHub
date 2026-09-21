@@ -28,6 +28,22 @@ class ExecutionStatus(str, Enum):
     NOT_MEASURED = "NOT_MEASURED"
 
 
+class ValidationVerdict(str, Enum):
+    """Top-level verdict of a model correctness and quality validation run."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    NOT_MEASURED = "NOT_MEASURED"
+
+
+class ValidationMode(str, Enum):
+    """Execution mode of the validation suite."""
+
+    SELF_VALIDATION = "SELF_VALIDATION"
+    COMPARISON = "COMPARISON"
+
+
 class ModelSpec(BaseModel):
     """Specification of the AI model under test."""
 
@@ -399,6 +415,110 @@ class ExperimentSpec(BaseModel):
         default_factory=_utc_now_iso,
         description="Creation timestamp in UTC (ISO-8601)",
     )
+
+
+class ValidationCase(BaseModel):
+    """Specification of an individual test case in the validation suite."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    case_id: str = Field(..., description="Stable unique identifier of the test case, e.g. 'basic_completion_001'")
+    prompt: str = Field(..., description="Input text prompt submitted to the model")
+    max_new_tokens: int = Field(default=16, description="Token limit for this case")
+    critical: bool = Field(default=False, description="True if failure in this case strictly blocks PASS verdict")
+    description: Optional[str] = Field(default=None, description="Human-readable description of case intent")
+    expected_pattern: Optional[str] = Field(default=None, description="Optional regex pattern to test against output")
+
+
+class ValidationRunResult(BaseModel):
+    """Execution evidence from running a single validation test case."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of ValidationRunResult")
+    case_id: str = Field(..., description="Identifier of the executed validation test case")
+    status: ExecutionStatus = Field(..., description="Execution outcome: SUCCESS, FAILED, SKIPPED, NOT_MEASURED")
+    input_tokens: Optional[int] = Field(default=None, description="Count of prompt tokens encoded")
+    generated_tokens: Optional[int] = Field(default=None, description="Count of newly generated tokens")
+    generated_text: Optional[str] = Field(default=None, description="Generated output text (excluding prompt)")
+    error: Optional[str] = Field(default=None, description="Error message if run failed or was skipped")
+    run_duration_ms: Optional[float] = Field(default=None, description="Execution elapsed time in milliseconds")
+
+    @model_validator(mode="after")
+    def validate_run_integrity(self) -> ValidationRunResult:
+        """Enforce validation execution integrity."""
+        if self.status == ExecutionStatus.SUCCESS:
+            if self.generated_text is None:
+                raise ValueError("SUCCESS status requires non-null generated_text")
+            if self.generated_tokens is None or self.generated_tokens < 0:
+                raise ValueError("SUCCESS status requires non-negative generated_tokens")
+        if self.status in (ExecutionStatus.SKIPPED, ExecutionStatus.NOT_MEASURED):
+            if self.generated_text is not None:
+                raise ValueError(f"Status '{self.status.value}' must not have generated_text")
+            if self.generated_tokens is not None or self.input_tokens is not None:
+                raise ValueError(f"Status '{self.status.value}' must not have token counts")
+        return self
+
+
+class ValidationReport(BaseModel):
+    """Consolidated assessment report of model correctness and quality validation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION, description="Schema version of ValidationReport")
+    mode: ValidationMode = Field(..., description="Validation suite mode: SELF_VALIDATION or COMPARISON")
+    model_id: str = Field(..., description="Target model repository or ID")
+    baseline_revision: str = Field(..., description="Immutable Git commit SHA of the baseline model snapshot")
+    candidate_revision: Optional[str] = Field(
+        default=None,
+        description="Immutable Git commit SHA of candidate model (None in SELF_VALIDATION mode)",
+    )
+    verdict: ValidationVerdict = Field(..., description="Top-level validation verdict: PASS, FAIL, INCONCLUSIVE, NOT_MEASURED")
+
+    # Correctness and Quality outcomes
+    correctness_passed: Optional[bool] = Field(
+        default=None,
+        description="True if all correctness gates passed; None if not measured",
+    )
+    quality_measured: bool = Field(
+        default=False,
+        description="True if comparative quality metrics were formally evaluated",
+    )
+    qrr_percent: Optional[float] = Field(
+        default=None,
+        description="Quality Retention Rate percentage (candidate_score / baseline_score * 100). None if not measured.",
+    )
+
+    # Case execution statistics
+    cases_total: int = Field(default=0, description="Total count of test cases in suite")
+    cases_completed: int = Field(default=0, description="Count of successfully executed test cases")
+    cases_failed: int = Field(default=0, description="Count of failed test cases")
+    critical_cases_failed: int = Field(default=0, description="Count of failed critical test cases")
+
+    # Evidence details
+    case_results: List[ValidationRunResult] = Field(default_factory=list, description="Per-case execution evidence")
+    reasons: List[str] = Field(default_factory=list, description="Structured explanations for verdict")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings or advisories")
+    created_at_utc: str = Field(default_factory=_utc_now_iso, description="ISO-8601 UTC timestamp")
+
+    @model_validator(mode="after")
+    def validate_report_integrity(self) -> ValidationReport:
+        """Enforce validation verdict consistency."""
+        if self.verdict == ValidationVerdict.PASS:
+            if self.critical_cases_failed > 0:
+                raise ValueError("Verdict cannot be PASS when critical cases failed")
+            if self.correctness_passed is not True:
+                raise ValueError("Verdict cannot be PASS when correctness did not pass")
+
+        if self.verdict == ValidationVerdict.NOT_MEASURED:
+            if self.correctness_passed is not None:
+                raise ValueError("NOT_MEASURED verdict must have correctness_passed as None")
+            if self.quality_measured is True:
+                raise ValueError("NOT_MEASURED verdict cannot have quality_measured as True")
+            if self.qrr_percent is not None:
+                raise ValueError("NOT_MEASURED verdict must have qrr_percent as None")
+
+        return self
 
 
 class ArtifactManifest(BaseModel):

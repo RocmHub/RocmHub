@@ -171,16 +171,32 @@ rocmhub/
                  │                       │                       │
                  └───────────────────────┼───────────────────────┘
                                          │
-                                         ▼
-                               ┌───────────────────┐
-                               │  BenchmarkResult  │
-                               └─────────┬─────────┘
-                                         │
-                                         ▼
-                               ┌───────────────────┐
-                               │  ArtifactManifest │
-                               └───────────────────┘
+                            ┌────────────┴───────────┐
+                            │                        │
+                            ▼                        ▼
+                  ┌───────────────────┐   ┌────────────────────┐
+                  │  BenchmarkResult  │   │  ValidationReport  │
+                  │  (Performance     │   │  (Correctness &    │
+                  │   Gate — TTFT,    │   │   Quality Gate —   │
+                  │   ITL, VRAM,      │   │   QRR, Verdict,    │
+                  │   Throughput)     │   │   Case Results)    │
+                  └────────┬──────────┘   └────────┬───────────┘
+                           │                       │
+                           │  ← Both gates must    │
+                           │    pass independently │
+                           └───────────┬───────────┘
+                                       │
+                                       ▼
+                             ┌───────────────────┐
+                             │  ArtifactManifest │
+                             └───────────────────┘
 ```
+
+> **Dual-gate invariant**: `BenchmarkResult.SUCCESS` ≠ `ROCmHub Verified`.
+> A fast model that generates corrupted or regressed output is **REJECTED**.
+> Performance Gate (TTFT, ITL, throughput, VRAM) and Quality Gate (correctness,
+> QRR) are **strictly independent** — no combined scores, no shared evaluators.
+
 
 ### 4.1 `ExecutionStatus`
 ```python
@@ -285,7 +301,42 @@ class BenchmarkResult:
     raw_latencies_ms: list[float] | None = None # Raw per-token latencies for future analysis
 ```
 
-### 4.8 `ArtifactManifest`
+### 4.8 `ValidationReport`
+```python
+class ValidationVerdict(str, Enum):
+    PASS = "PASS"               # All correctness gates and critical cases passed
+    FAIL = "FAIL"               # Critical case failed, correctness gate failed, or QRR below threshold
+    INCONCLUSIVE = "INCONCLUSIVE"  # Execution completed but quality insufficient for conclusions
+    NOT_MEASURED = "NOT_MEASURED"  # Skipped — no AMD accelerator or preflight blocked execution
+
+class ValidationReport:
+    schema_version: str = "1.0.0"
+    mode: ValidationMode          # SELF_VALIDATION | COMPARISON
+    model_id: str
+    baseline_revision: str        # Immutable 40-char commit SHA of baseline
+    candidate_revision: str | None  # None in SELF_VALIDATION mode
+    verdict: ValidationVerdict
+
+    correctness_passed: bool | None  # None if not measured
+    quality_measured: bool           # True only in COMPARISON mode with valid pairs
+    qrr_percent: float | None        # Quality Retention Rate = (cand_score/base_score)*100
+                                     # Invariant: None in SELF_VALIDATION mode (always)
+
+    cases_total: int
+    cases_completed: int
+    cases_failed: int
+    critical_cases_failed: int
+    case_results: list[ValidationRunResult]
+    reasons: list[str]
+    warnings: list[str]
+```
+
+**ValidationReport invariants (enforced by Pydantic validator):**
+- `PASS` requires `correctness_passed=True` AND `critical_cases_failed=0`.
+- `NOT_MEASURED` requires `correctness_passed=None`, `quality_measured=False`, `qrr_percent=None`.
+- `qrr_percent` is **always `None`** in `SELF_VALIDATION` mode — baseline does not compare against itself.
+
+### 4.9 `ArtifactManifest`
 ```python
 class ArtifactManifest:
     schema_version: str = "1.0.0"
@@ -296,6 +347,7 @@ class ArtifactManifest:
     reproduce_command: str          # e.g. "rocmhub run --model ... --precision ..."
     manifest_checksum: str          # SHA256 of canonical JSON content
 ```
+
 
 ---
 

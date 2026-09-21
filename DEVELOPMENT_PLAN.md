@@ -115,11 +115,11 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Conservative capabilities: `amd_gpu_present`, `rocm_detected`, `hip_detected`, `torch_available`, `torch_hip_available`, `model_metadata_complete`, `remote_code_required`, `baseline_runtime_candidate`.
   - Zero weight downloads, zero inference executions.
 - [x] CLI command: `rocmhub check <model_id> [--revision <rev>] [--json]`:
-  - Human-readable summary table and pure JSON output.
-  - Standardized exit codes: 0 (READY), 2 (NO_ACCELERATOR), 3 (BLOCKED), 4 (UNKNOWN), 1 (Error).
+   - Human-readable summary table and pure JSON output.
+   - Standardized exit codes: 0 (READY), 2 (NO_ACCELERATOR), 3 (BLOCKED), 4 (UNKNOWN), 1 (Error).
 - **Verification**: 79 tests (unit tests covering READY, NO_ACCELERATOR, ROCm missing, CPU PyTorch, unknown GFX, incomplete metadata, multi-GPU, structured reason codes + live network integration test on macOS).
 
-### Phase 5: Baseline Runner Adapter
+### Phase 5: Baseline Runner Adapter (COMPLETED)
 - [x] Implement `rocmhub/runners/base.py`:
   - Abstract `BaseRunner` Protocol: `supports()`, `load()`, `generate()`, `unload()`.
 - [x] Implement `rocmhub/runners/hf_runner.py` (`pytorch_transformers_hip`):
@@ -135,7 +135,7 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Outputs human-readable summary or structured `RunResult` JSON.
 - **Verification**: 96 tests (93 offline unit tests covering lifecycle, token counts, error states, preflight gating + 3 live network integration tests).
 
-### Phase 6: Benchmark Harness & Metrics
+### Phase 6: Benchmark Harness & Metrics (COMPLETED)
 - [x] Implement `rocmhub/benchmarks/base.py`:
   - `BenchmarkConfig` with bounds validation (`warmup_runs >= 0`, `measurement_runs >= 1`, `max_new_tokens > 0`, `device_id >= 0`).
   - `BenchmarkRunMeasurement` structure storing raw timing evidence per run.
@@ -157,7 +157,39 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Clean human-readable table and JSON outputs.
 - **Verification**: 117 tests (113 offline unit tests covering TTFT, ITL, percentiles, memory, sync, failure states, preflight gates + 4 live network integration tests).
 
-### Phase 7: Artifact Builder & Manifest Generator
+### Phase 7: Correctness & Quality Validation (COMPLETED)
+**Principal: БЫСТРЕЕ ≠ ЛУЧШЕ, ЕСЛИ МОДЕЛЬ СТАЛА ХУЖЕ.**
+- [x] Implement `rocmhub/validation/base.py`:
+  - `ValidationCase`: stable `case_id`, `prompt`, `max_new_tokens`, `critical`, `expected_pattern`.
+  - `ValidationConfig`: immutable Pydantic model with bounds-validated `max_new_tokens`, `quality_threshold`, `precision`, `device_id`.
+  - `DEFAULT_VALIDATION_CASES`: 3 stable cases (`basic_completion_001`, `instruction_following_001`, `deterministic_generation_001`).
+- [x] Implement `rocmhub/validation/correctness.py`:
+  - `CorrectnessEvaluator`: inference completion, non-empty output, positive token count, NaN/Inf/`\ufffd` corruption detection, regex pattern matching, determinism (repeated runs under fixed seed).
+  - `CorrectnessResult`: `passed`, `checks_run`, `checks_passed`, `checks_failed`, `failures`.
+- [x] Implement `rocmhub/validation/quality.py`:
+  - `QualityMetric` Protocol: composable per-case scoring interface.
+  - `ExactTokenAgreementMetric`: character-exact agreement (1.0 or 0.0).
+  - `NormalizedTextAgreementMetric`: Jaccard word-overlap ratio.
+  - `QualityEvaluator`: self-validation mode → `quality_measured=False`, `qrr_percent=None` strictly.
+  - Comparison mode → `QRR = (candidate_score / baseline_score) * 100`; division-by-zero → `None`.
+- [x] Implement `rocmhub/validation/evaluator.py`:
+  - `ValidationEvaluator.run_self_validation()`: executes suite on baseline runner; correctness gating; `quality_measured=False`, `qrr_percent=None` always.
+  - `ValidationEvaluator.run_comparison()`: executes suite on both runners; QRR-gated verdict.
+  - Verdict assignment: `PASS | FAIL | INCONCLUSIVE | NOT_MEASURED`.
+- [x] Add `ValidationCase`, `ValidationRunResult`, `ValidationReport` to `core/types.py`:
+  - `ValidationRunResult` Pydantic validator: SUCCESS requires non-null `generated_text` and `generated_tokens >= 0`; SKIPPED/NOT_MEASURED forbid token fields.
+  - `ValidationReport` Pydantic validator: PASS requires `correctness_passed=True` and `critical_cases_failed=0`; NOT_MEASURED requires all metrics `None`.
+- [x] Add validation errors to `core/errors.py`:
+  - `ValidationError`, `InvalidValidationConfigError`, `CorrectnessGateFailedError`, `QualityGateFailedError`.
+- [x] Implement CLI command `rocmhub validate <model_id> [--revision] [--device] [--precision] [--max-new-tokens] [--json]`:
+  - Preflight gate identical to `run`/`benchmark`: exits 2 (NO_ACCELERATOR), 3 (BLOCKED), 4 (UNKNOWN) without downloading weights.
+  - On preflight failure: constructs `ValidationReport(verdict=NOT_MEASURED)` with all metrics `None`.
+  - On READY: loads runner, runs `ValidationEvaluator.run_self_validation()`, unloads runner in `finally`.
+  - Exit codes: `0=PASS`, `2=NOT_MEASURED`, `3=FAIL`, `4=INCONCLUSIVE`, `1=error`.
+- **Validation Independence**: `ValidationEvaluator` is completely decoupled from `BenchmarkHarness` — no shared state, no combined scores.
+- **Verification**: 201 offline tests (88 new validation tests + 113 regression-free existing tests) + 5 live network integration tests.
+
+### Phase 8: Artifact Builder & Manifest Generator
 - [ ] Implement `rocmhub/artifacts/builder.py`:
   - Creates artifact directory: `artifacts/<model_slug>_<timestamp>/`.
   - Writes:
@@ -168,14 +200,11 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Computes manifest SHA256 checksum for tamper evidence.
 - **Verification**: Validates created directory layout and verifies manifest JSON matches schema.
 
-### Phase 8: CLI Entrypoint & End-to-End Slice
-- [ ] Implement `rocmhub/cli/main.py`:
-  - Commands:
-    - `rocmhub env`: Displays detected AMD hardware and ROCm status.
-    - `rocmhub inspect <model_id>`: Displays model metadata, parameter count, and tensor info.
-    - `rocmhub run --model <model_id> [--precision fp16|bf16] [--device 0]`: Runs full pipeline.
+### Phase 9: CLI Entrypoint & End-to-End Slice
+- [ ] Full end-to-end slice on real AMD ROCm hardware:
+  - `rocmhub inspect`, `rocmhub env`, `rocmhub check`, `rocmhub run`, `rocmhub benchmark`, `rocmhub validate`.
   - Clean formatted output table using terminal colors/formatting.
-- **Verification**: Run `rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct` end-to-end.
+- **Verification**: Run `rocmhub validate Qwen/Qwen2.5-0.5B-Instruct` end-to-end on ROCm machine.
 
 ---
 

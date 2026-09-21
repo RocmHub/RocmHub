@@ -147,6 +147,30 @@ class BenchmarkHarnessError(BenchmarkError):
     error_code = "BENCHMARK_HARNESS_FAILED"
 
 
+class ValidationError(ROCmHubError):
+    """Base exception for model correctness and quality validation failures."""
+
+    error_code = "VALIDATION_ERROR"
+
+
+class InvalidValidationConfigError(ValidationError):
+    """Raised when validation suite configuration parameters violate validation bounds."""
+
+    error_code = "INVALID_VALIDATION_CONFIG"
+
+
+class CorrectnessGateFailedError(ValidationError):
+    """Raised when hard correctness verification gates fail."""
+
+    error_code = "CORRECTNESS_GATE_FAILED"
+
+
+class QualityGateFailedError(ValidationError):
+    """Raised when comparative quality regression thresholds are violated."""
+
+    error_code = "QUALITY_GATE_FAILED"
+
+
 class ArtifactPackagingError(ROCmHubError):
     """Raised when artifact manifest, packaging, or checksum validation fails."""
 

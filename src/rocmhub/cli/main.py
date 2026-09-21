@@ -18,11 +18,15 @@ from rocmhub.core.types import (
     ExecutionStatus,
     ModelSpec,
     RunResult,
+    ValidationMode,
+    ValidationReport,
+    ValidationVerdict,
 )
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
 from rocmhub.runners import HuggingFaceRunner
+from rocmhub.validation import DEFAULT_VALIDATION_CASES, ValidationConfig, ValidationEvaluator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -213,6 +217,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output BenchmarkResult as pure JSON on stdout.",
     )
 
+    # Command: validate
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate model correctness: run the built-in validation suite (self-validation mode).",
+    )
+    validate_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    validate_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    validate_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    validate_parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="Target accelerator device index (default: 0).",
+    )
+    validate_parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Inference precision (default: 'fp16').",
+    )
+    validate_parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=16,
+        help="Maximum tokens to generate per validation case (default: 16).",
+    )
+    validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ValidationReport as pure JSON on stdout.",
+    )
+
     return parser
 
 
@@ -399,6 +449,75 @@ def _format_benchmark_result(res: BenchmarkResult) -> str:
         lines.extend(["", f"{'Error Message:':<24} {res.error_message}"])
 
     return "\n".join(lines)
+
+
+def _format_validation_report(report: ValidationReport) -> str:
+    """Format ValidationReport into a clean human-readable summary table."""
+    mode_str = report.mode.value
+    verdict_str = report.verdict.value
+
+    correctness_str: str
+    if report.correctness_passed is None:
+        correctness_str = "not measured"
+    elif report.correctness_passed:
+        correctness_str = "passed"
+    else:
+        correctness_str = "FAILED"
+
+    qrr_str = f"{report.qrr_percent:.1f}%" if report.qrr_percent is not None else "n/a"
+
+    lines = [
+        f"{'Validation Result:':<26} {verdict_str}",
+        f"{'Model:':<26} {report.model_id}",
+        f"{'Baseline Revision:':<26} {report.baseline_revision}",
+    ]
+    if report.candidate_revision:
+        lines.append(f"{'Candidate Revision:':<26} {report.candidate_revision}")
+
+    lines += [
+        f"{'Mode:':<26} {mode_str}",
+        "",
+        f"{'Cases Total:':<26} {report.cases_total}",
+        f"{'Cases Completed:':<26} {report.cases_completed}",
+        f"{'Cases Failed:':<26} {report.cases_failed}",
+        f"{'Critical Cases Failed:':<26} {report.critical_cases_failed}",
+        "",
+        f"{'Correctness:':<26} {correctness_str}",
+        f"{'Quality Measured:':<26} {'yes' if report.quality_measured else 'no'}",
+        f"{'QRR:':<26} {qrr_str}",
+        "",
+        f"{'Verdict:':<26} {verdict_str}",
+    ]
+
+    if report.reasons:
+        lines.append("")
+        lines.append("Reasons:")
+        for r in report.reasons:
+            lines.append(f"  - {r}")
+
+    if report.warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for w in report.warnings:
+            lines.append(f"  - {w}")
+
+    if report.case_results:
+        lines.append("")
+        lines.append("Case Results:")
+        for cr in report.case_results:
+            status_tag = cr.status.value.upper()
+            tokens_str = (
+                f"{cr.generated_tokens} tokens" if cr.generated_tokens is not None else "no tokens"
+            )
+            dur_str = f"{cr.run_duration_ms:.0f} ms" if cr.run_duration_ms is not None else "n/a"
+            lines.append(f"  [{status_tag}] {cr.case_id} — {tokens_str} in {dur_str}")
+            if cr.error:
+                lines.append(f"           error: {cr.error}")
+
+    return "\n".join(lines)
+
+
+
 
 
 def main(args: Optional[List[str]] = None) -> int:
@@ -664,7 +783,117 @@ def main(args: Optional[List[str]] = None) -> int:
             sys.stderr.write(f"Unexpected error: {exc}\n")
             return 1
 
+    if parsed_args.command == "validate":
+        target_model_id = parsed_args.model_id or parsed_args.model_opt
+        if not target_model_id:
+            sys.stderr.write("Error: model_id must be provided to 'rocmhub validate'.\n")
+            return 1
+
+        try:
+            # 1. Inspect model metadata (resolves immutable commit SHA, no weights downloaded)
+            source = HuggingFaceModelSource()
+            inspector = ModelInspector(source=source)
+            model_spec = inspector.inspect(
+                model_id=target_model_id,
+                revision=parsed_args.revision,
+            )
+
+            # 2. Observe system hardware and runtime environment
+            observer = SystemObserver()
+            detection = observer.observe()
+
+            # 3. Preflight capability evaluation
+            evaluator = CapabilityEvaluator()
+            capability_report = evaluator.evaluate(model=model_spec, detection=detection)
+
+            # 4. Preflight gate — skip execution if no capable accelerator available
+            if capability_report.verdict != EvaluationVerdict.READY:
+                skip_reason = (
+                    f"Validation skipped: preflight verdict is {capability_report.verdict.value}."
+                )
+                # Build NOT_MEASURED report — no inference was executed
+                not_measured_report = ValidationReport(
+                    mode=ValidationMode.SELF_VALIDATION,
+                    model_id=model_spec.model_id,
+                    baseline_revision=model_spec.commit_sha,
+                    candidate_revision=None,
+                    verdict=ValidationVerdict.NOT_MEASURED,
+                    correctness_passed=None,
+                    quality_measured=False,
+                    qrr_percent=None,
+                    cases_total=len(DEFAULT_VALIDATION_CASES),
+                    cases_completed=0,
+                    cases_failed=0,
+                    critical_cases_failed=0,
+                    case_results=[],
+                    reasons=[skip_reason]
+                    + [f"[{r.severity.value.upper()}] {r.code}: {r.message}" for r in capability_report.reasons],
+                    warnings=capability_report.warnings,
+                )
+
+                if parsed_args.json:
+                    sys.stdout.write(not_measured_report.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(
+                        f"Preflight Check: {capability_report.verdict.value}\n"
+                        f"{skip_reason}\n\n"
+                        "Reasons:\n"
+                    )
+                    for r in capability_report.reasons:
+                        sys.stdout.write(f"  [{r.severity.value.upper()}] {r.code}: {r.message}\n")
+                    sys.stdout.write("\nModel weights were NOT downloaded and validation was NOT executed.\n")
+
+                verdict_exit_codes = {
+                    EvaluationVerdict.NO_ACCELERATOR: 2,
+                    EvaluationVerdict.BLOCKED: 3,
+                    EvaluationVerdict.UNKNOWN: 4,
+                }
+                return verdict_exit_codes.get(capability_report.verdict, 1)
+
+            # 5. Preflight is READY: proceed to validation execution
+            val_config = ValidationConfig(
+                cases=DEFAULT_VALIDATION_CASES,
+                max_new_tokens=parsed_args.max_new_tokens,
+            )
+            val_evaluator = ValidationEvaluator(config=val_config)
+
+            runner = HuggingFaceRunner()
+            try:
+                runner.load(
+                    model=model_spec,
+                    device_id=parsed_args.device,
+                    precision=parsed_args.precision,
+                )
+                validation_report = val_evaluator.run_self_validation(
+                    runner=runner,
+                    model=model_spec,
+                )
+
+                if parsed_args.json:
+                    sys.stdout.write(validation_report.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_validation_report(validation_report) + "\n")
+
+                # Exit codes: 0=PASS, 2=NOT_MEASURED, 3=FAIL, 4=INCONCLUSIVE
+                verdict_exit_codes_val = {
+                    ValidationVerdict.PASS: 0,
+                    ValidationVerdict.NOT_MEASURED: 2,
+                    ValidationVerdict.FAIL: 3,
+                    ValidationVerdict.INCONCLUSIVE: 4,
+                }
+                return verdict_exit_codes_val.get(validation_report.verdict, 1)
+            finally:
+                runner.unload()
+
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error: {exc}\n")
+            return 1
+
     return 0
+
 
 
 if __name__ == "__main__":

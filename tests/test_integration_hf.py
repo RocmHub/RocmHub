@@ -130,3 +130,49 @@ def test_live_benchmark_qwen_model_on_current_mac_stops_at_preflight(capsys: pyt
     assert "NO_ACCELERATOR" in bench_dict["error_message"]
 
 
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_validate_qwen_model_on_current_mac_stops_at_preflight(capsys: pytest.CaptureFixture[str]) -> None:
+    """Live integration test: rocmhub validate stops at preflight on Mac without downloading weights.
+
+    Verifies:
+    - Real Hugging Face Hub metadata is fetched (commit SHA resolved).
+    - Real SystemObserver observes Mac host (no AMD GPU).
+    - CapabilityEvaluator verdict is NO_ACCELERATOR.
+    - CLI exits with code 2 (NOT_MEASURED).
+    - ValidationReport has verdict=NOT_MEASURED, all metrics None.
+    - No model weights were downloaded (cases_completed == 0).
+    """
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    exit_code = main(["validate", model_id, "--json"])
+
+    # On macOS without AMD GPU, exit code must be 2 (NOT_MEASURED)
+    assert exit_code == 2
+
+    captured = capsys.readouterr()
+    report_dict = json.loads(captured.out)
+
+    assert report_dict["verdict"] == "NOT_MEASURED"
+    assert report_dict["model_id"] == model_id
+    assert report_dict["mode"] == "SELF_VALIDATION"
+    assert report_dict["correctness_passed"] is None
+    assert report_dict["quality_measured"] is False
+    assert report_dict["qrr_percent"] is None
+    assert report_dict["cases_completed"] == 0
+    assert report_dict["cases_failed"] == 0
+    assert report_dict["critical_cases_failed"] == 0
+    assert len(report_dict["case_results"]) == 0
+
+    # Baseline revision must be a real immutable commit SHA (40 hex chars)
+    assert len(report_dict["baseline_revision"]) == 40
+    assert all(c in "0123456789abcdef" for c in report_dict["baseline_revision"])
+
+    # Reasons must mention the skip
+    reasons_text = " ".join(report_dict["reasons"])
+    assert (
+        "NO_ACCELERATOR" in reasons_text
+        or "preflight" in reasons_text.lower()
+        or "skipped" in reasons_text.lower()
+    )

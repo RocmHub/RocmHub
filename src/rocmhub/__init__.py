@@ -26,8 +26,14 @@ from rocmhub.core.types import (
     ModelSpec,
     RunResult,
     SystemCapabilities,
+    ValidationCase,
+    ValidationMode,
+    ValidationReport,
+    ValidationRunResult,
+    ValidationVerdict,
 )
 from rocmhub.runners import BaseRunner, HuggingFaceRunner
+from rocmhub.validation import ValidationConfig, ValidationEvaluator
 
 __all__ = [
     "__version__",
@@ -54,5 +60,12 @@ __all__ = [
     "RunResult",
     "ExperimentSpec",
     "BenchmarkResult",
+    "ValidationConfig",
+    "ValidationEvaluator",
+    "ValidationReport",
+    "ValidationVerdict",
+    "ValidationMode",
+    "ValidationCase",
+    "ValidationRunResult",
     "ArtifactManifest",
 ]

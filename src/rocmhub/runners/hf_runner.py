@@ -5,7 +5,7 @@ from __future__ import annotations
 import gc
 from contextlib import nullcontext
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 try:
     import torch  # type: ignore[import-not-found]
@@ -360,6 +360,42 @@ class HuggingFaceRunner:
                     "cause": str(exc),
                 },
             ) from exc
+
+    def generate_stream(
+        self,
+        prompt: str,
+        max_new_tokens: int = 16,
+        streamer: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> Tuple[RunResult, List[int]]:
+        """Execute deterministic inference while capturing streaming token timestamps.
+
+        Args:
+            prompt: Input text prompt.
+            max_new_tokens: Maximum count of new tokens to generate.
+            streamer: Optional streamer observer. Defaults to TokenTimestampStreamer.
+            **kwargs: Additional generation arguments.
+
+        Returns:
+            Tuple of (RunResult, List[int] of monotonic nanosecond timestamps per generated token).
+        """
+        if streamer is None:
+            from rocmhub.benchmarks.streaming import TokenTimestampStreamer
+
+            streamer = TokenTimestampStreamer(skip_prompt=True)
+
+        run_result = self.generate(
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            streamer=streamer,
+            **kwargs,
+        )
+
+        timestamps: List[int] = []
+        if hasattr(streamer, "token_timestamps_ns"):
+            timestamps = list(streamer.token_timestamps_ns)
+
+        return run_result, timestamps
 
     def unload(self) -> None:
         """Release device and host memory, clean references, and collect garbage."""

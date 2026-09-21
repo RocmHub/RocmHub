@@ -2,6 +2,12 @@
 
 __version__ = "0.1.0"
 
+from rocmhub.benchmarks import (
+    BenchmarkConfig,
+    BenchmarkHarness,
+    BenchmarkRunMeasurement,
+    MetricsCalculator,
+)
 from rocmhub.capabilities import CapabilityEvaluator, CapabilityPolicy
 from rocmhub.core.errors import ROCmHubError
 from rocmhub.core.types import (
@@ -30,6 +36,10 @@ __all__ = [
     "CapabilityPolicy",
     "BaseRunner",
     "HuggingFaceRunner",
+    "BenchmarkConfig",
+    "BenchmarkRunMeasurement",
+    "BenchmarkHarness",
+    "MetricsCalculator",
     "ExecutionStatus",
     "ModelSpec",
     "HardwareSpec",

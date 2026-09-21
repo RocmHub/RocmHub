@@ -135,6 +135,18 @@ class BenchmarkError(ROCmHubError):
     error_code = "BENCHMARK_ERROR"
 
 
+class InvalidBenchmarkConfigError(BenchmarkError):
+    """Raised when benchmark configuration parameters violate validation bounds."""
+
+    error_code = "INVALID_BENCHMARK_CONFIG"
+
+
+class BenchmarkHarnessError(BenchmarkError):
+    """Raised when the benchmark harness encounters an unrecoverable execution failure."""
+
+    error_code = "BENCHMARK_HARNESS_FAILED"
+
+
 class ArtifactPackagingError(ROCmHubError):
     """Raised when artifact manifest, packaging, or checksum validation fails."""
 

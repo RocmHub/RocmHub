@@ -107,3 +107,26 @@ def test_live_run_qwen_model_on_current_mac_stops_at_preflight(capsys: pytest.Ca
     assert "NO_ACCELERATOR" in run_dict["error"]
 
 
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_benchmark_qwen_model_on_current_mac_stops_at_preflight(capsys: pytest.CaptureFixture[str]) -> None:
+    """Live integration test: rocmhub benchmark stops at preflight on Mac without downloading weights."""
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    exit_code = main(["benchmark", model_id, "--prompt", "Hello", "--max-new-tokens", "8", "--json"])
+
+    # Must exit with code 2 (NO_ACCELERATOR)
+    assert exit_code == 2
+
+    captured = capsys.readouterr()
+    bench_dict = json.loads(captured.out)
+
+    assert bench_dict["status"] == "SKIPPED"
+    assert bench_dict["model_id"] == model_id
+    assert bench_dict["ttft_ms"] is None
+    assert bench_dict["itl_ms_mean"] is None
+    assert bench_dict["throughput_tokens_per_sec"] is None
+    assert bench_dict["peak_vram_used_mb"] is None
+    assert bench_dict["total_latency_ms"] is None
+    assert "NO_ACCELERATOR" in bench_dict["error_message"]
+
+

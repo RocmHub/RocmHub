@@ -131,16 +131,21 @@ rocmhub/
   - Memory cleanup on `unload()`: `gc.collect()` and `torch.cuda.empty_cache()` (if CUDA/HIP available).
   - Preflight gating: if `capability_report.verdict != READY`, execution is skipped without downloading weights.
 
-### 3.4 `rocmhub.benchmarks`
-- **`BenchmarkHarness`**: Controls warm-up cycles and timed iterations.
-- **`LatencyTracker`**: Custom streaming token collector recording:
-  - Timestamp of prompt submission $t_0$.
-  - First token arrival $t_1 \rightarrow \text{TTFT} = (t_1 - t_0) \times 1000$ ms.
-  - Subsequent tokens $t_i \rightarrow \text{ITL}_i = (t_i - t_{i-1}) \times 1000$ ms.
-  - Raw inter-token latency series for distribution analysis.
-- **`MemoryTracker`**: Monitors device VRAM before run, during generation peak, and after run (using `torch.cuda.max_memory_allocated()` and ROCm SMI samples).
+### 3.5 `rocmhub.benchmarks`
+- **`BenchmarkHarness`**: Orchestrates warmup iterations, timed measurement iterations, and accelerator device synchronization (`torch.cuda.synchronize`).
+- **`TokenTimestampStreamer`**: Streaming emission callback that captures high-resolution monotonic timestamps (`time.perf_counter_ns`) upon the arrival of each newly decoded token.
+- **`MemoryTracker`**: Monitors PyTorch allocator-observed peak memory using `torch.cuda.max_memory_allocated(device)` and resets via `reset_peak_memory_stats(device)`. Documented as *allocator-observed memory*, not total physical VRAM.
+- **`MetricsCalculator`**: Pure statistical calculation and aggregation engine:
+  - **TTFT (Time To First Token)**: $\text{TTFT} = \frac{t_{\text{first\_token\_ns}} - t_{\text{request\_start\_ns}}}{1{,}000{,}000}$ ms. Strictly defined as generation start to first generated token arrival. Never approximated by total latency or average token time.
+  - **ITL (Inter-Token Latency)**: $\text{ITL}_i = \frac{t_{i+1} - t_i}{1{,}000{,}000}$ ms. Strictly measures consecutive generated token intervals. TTFT is never included. If $\text{generated\_tokens} < 2$, all ITL summary metrics are `None`. Summary metrics include arithmetic mean, p50, p90, and p99 via deterministic linear-interpolation percentiles without external dependencies.
+  - **Throughput**: End-to-end generation throughput: $\frac{\text{generated\_tokens}}{\text{total\_generation\_time\_seconds}}$ from request start to last generated token.
+  - **Peak Memory**: $\max_{r \in \text{valid\_runs}}(\text{peak\_vram\_used\_mb}_r)$.
+  - **Warmup Exclusion**: Warmup runs are strictly excluded from final metric summaries.
+  - **Partial Failure Rule**: If any measurement run fails, the entire benchmark is marked `FAILED` with all performance metrics set to `None`.
+  - **Diagnostic / Non-Ready Integrity**: If preflight check is not `READY` (e.g. on macOS dev host without AMD GPU), benchmark status is `SKIPPED` / `NOT_MEASURED`, weights are not downloaded, and all performance metrics are strictly `None`.
+- **Distinction**: `BenchmarkResult` `SUCCESS` $\ne$ `ROCmHub Verified`. A successful benchmark confirms execution speed; verification requires subsequent quality, perplexity, and reproducibility evaluation.
 
-### 3.5 `rocmhub.artifacts`
+### 3.6 `rocmhub.artifacts`
 - **`ArtifactBuilder`**: Bundles:
   - `manifest.json`: Machine-readable metadata conforming to `ArtifactManifest` schema.
   - `metrics.json`: Detailed benchmark statistics and optional raw samples.

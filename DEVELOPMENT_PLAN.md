@@ -136,21 +136,26 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - **Verification**: 96 tests (93 offline unit tests covering lifecycle, token counts, error states, preflight gating + 3 live network integration tests).
 
 ### Phase 6: Benchmark Harness & Metrics
-- [ ] Implement `rocmhub/benchmarks/metrics.py`:
-  - Accurate time collection for:
-    - Prompt processing start $t_0$.
-    - First token arrival $t_1 \rightarrow \text{TTFT} = (t_1 - t_0) \times 1000$ ms.
-    - Subsequent tokens $t_i \rightarrow \text{ITL}_i = (t_i - t_{i-1}) \times 1000$ ms.
-  - Computes ITL statistics: mean, median (p50), 90th percentile (p90), 99th percentile (p99).
-  - Throughput: $\frac{\text{total tokens}}{\sum \text{ITL}}$.
-  - Retains raw latency samples (`raw_latencies_ms`).
-- [ ] Implement `rocmhub/benchmarks/memory.py`:
-  - Queries `torch.cuda.max_memory_allocated()` and tracks peak memory in MB.
-- [ ] Implement `rocmhub/benchmarks/harness.py`:
-  - Executes configurable warmup iterations (to allow HIP/MIOpen kernel compilation).
-  - Executes timed runs and aggregates metric distributions.
-  - In diagnostic mode, marks metrics as `NOT_MEASURED` (never synthesizes mock numbers).
-- **Verification**: Benchmark metric calculations verified with unit tests.
+- [x] Implement `rocmhub/benchmarks/base.py`:
+  - `BenchmarkConfig` with bounds validation (`warmup_runs >= 0`, `measurement_runs >= 1`, `max_new_tokens > 0`, `device_id >= 0`).
+  - `BenchmarkRunMeasurement` structure storing raw timing evidence per run.
+- [x] Implement `rocmhub/benchmarks/streaming.py`:
+  - `TokenTimestampStreamer` recording high-resolution monotonic timestamps (`time.perf_counter_ns`) upon token emission.
+- [x] Implement `rocmhub/benchmarks/memory.py`:
+  - `MemoryTracker` querying PyTorch allocator peak memory stats (`torch.cuda.max_memory_allocated`).
+- [x] Implement `rocmhub/benchmarks/metrics.py`:
+  - Exact TTFT: $(t_{\text{first\_token}} - t_{\text{request\_start}})$ in ms.
+  - Consecutive ITL deltas $(t_{i+1} - t_i)$ in ms, strictly excluding TTFT.
+  - End-to-end throughput: $\frac{\text{generated\_tokens}}{\text{total\_generation\_time\_seconds}}$.
+  - Deterministic linear-interpolation percentiles (p50, p90, p99) without external dependencies.
+  - Warmup runs strictly excluded from performance summary metrics.
+  - Partial failure rule: if any measurement run fails, entire benchmark is marked `FAILED` with `None` performance metrics.
+- [x] Implement `rocmhub/benchmarks/harness.py`:
+  - Coordinates warmup, measurement iterations, and accelerator device synchronization (`torch.cuda.synchronize`).
+- [x] Implement CLI command `rocmhub benchmark <model_id>`:
+  - Preflight gating: halts with codes 2 (`NO_ACCELERATOR`), 3 (`BLOCKED`), 4 (`UNKNOWN`) without downloading weights.
+  - Clean human-readable table and JSON outputs.
+- **Verification**: 117 tests (113 offline unit tests covering TTFT, ITL, percentiles, memory, sync, failure states, preflight gates + 4 live network integration tests).
 
 ### Phase 7: Artifact Builder & Manifest Generator
 - [ ] Implement `rocmhub/artifacts/builder.py`:

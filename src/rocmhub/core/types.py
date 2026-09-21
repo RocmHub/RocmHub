@@ -334,6 +334,19 @@ class BenchmarkResult(BaseModel):
         default=None,
         description="Optional raw per-token latency sequence for detailed distribution profiling.",
     )
+    # Workload metadata (optional / nullable)
+    model_id: Optional[str] = Field(default=None, description="Target model repository or ID")
+    model_revision: Optional[str] = Field(default=None, description="Immutable Git commit SHA of the benchmarked model")
+    device_id: Optional[int] = Field(default=None, description="Logical accelerator device index")
+    runtime_name: Optional[str] = Field(default=None, description="Runtime adapter identifier, e.g. 'pytorch_transformers_hip'")
+    precision: Optional[str] = Field(default=None, description="Precision used, e.g. 'fp16', 'bf16', 'fp32'")
+
+    # Run execution counts
+    warmup_runs: Optional[int] = Field(default=None, description="Count of executed warmup iterations")
+    measurement_runs_requested: Optional[int] = Field(default=None, description="Count of requested measurement iterations")
+    measurement_runs_completed: Optional[int] = Field(default=None, description="Count of successfully completed measurement iterations")
+    failed_runs: Optional[int] = Field(default=None, description="Count of failed measurement iterations")
+    raw_measurements_reference: Optional[str] = Field(default=None, description="Optional path or URI to detailed raw run measurements")
 
     @model_validator(mode="after")
     def validate_metrics_consistency(self) -> BenchmarkResult:

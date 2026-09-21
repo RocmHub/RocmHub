@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from rocmhub import __version__
+from rocmhub.benchmarks import BenchmarkConfig, BenchmarkHarness
 from rocmhub.capabilities import CapabilityEvaluator
 from rocmhub.core.errors import ROCmHubError
 from rocmhub.core.types import (
+    BenchmarkResult,
     CapabilityReport,
     DetectionReport,
     EvaluationVerdict,
@@ -139,6 +141,76 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output RunResult as pure JSON on stdout.",
+    )
+
+    # Command: benchmark
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Benchmark model baseline performance (TTFT, ITL, throughput, VRAM).",
+    )
+    benchmark_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    benchmark_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    benchmark_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    benchmark_parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="Target accelerator device index (default: 0).",
+    )
+    benchmark_parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Inference precision (default: 'fp16').",
+    )
+    benchmark_parser.add_argument(
+        "--prompt",
+        default="Hello, ROCm!",
+        help="Input text prompt for benchmark workload.",
+    )
+    benchmark_parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=16,
+        help="Maximum tokens to generate per run (default: 16).",
+    )
+    benchmark_parser.add_argument(
+        "--warmup-runs",
+        type=int,
+        default=2,
+        help="Count of untimed warmup iterations (default: 2).",
+    )
+    benchmark_parser.add_argument(
+        "--runs",
+        dest="runs",
+        type=int,
+        default=5,
+        help="Count of timed measurement iterations (default: 5).",
+    )
+    benchmark_parser.add_argument(
+        "--measurement-runs",
+        dest="runs",
+        type=int,
+        help="Alias for --runs.",
+    )
+    benchmark_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output BenchmarkResult as pure JSON on stdout.",
     )
 
     return parser
@@ -288,6 +360,44 @@ def _format_run_result(result: RunResult) -> str:
     lines.append(f"Status: {result.status.value}")
     if result.error:
         lines.append(f"Error:  {result.error}")
+    return "\n".join(lines)
+
+
+def _format_benchmark_result(res: BenchmarkResult) -> str:
+    """Format BenchmarkResult into a clean human-readable summary table."""
+    def _val(val: Optional[Any], unit: str = "") -> str:
+        if val is None:
+            return "not measured"
+        if isinstance(val, float):
+            return f"{val:,.2f} {unit}".strip()
+        if isinstance(val, int):
+            return f"{val:,} {unit}".strip()
+        return str(val)
+
+    lines = [
+        f"{'Benchmark Result:':<24} {res.status.value}",
+        f"{'Model:':<24} {res.model_id or 'unknown'}",
+        f"{'Revision:':<24} {res.model_revision or 'unknown'}",
+        f"{'Runtime:':<24} {res.runtime_name or 'pytorch_transformers_hip'}",
+        f"{'Device:':<24} {f'cuda:{res.device_id}' if res.device_id is not None else 'cuda:0'}",
+        f"{'Precision:':<24} {res.precision or 'fp16'}",
+        "",
+        f"{'Warmup Runs:':<24} {_val(res.warmup_runs)}",
+        f"{'Measurement Runs:':<24} {_val(res.measurement_runs_completed)} of {_val(res.measurement_runs_requested)}",
+        "",
+        f"{'TTFT (median):':<24} {_val(res.ttft_ms, 'ms')}",
+        f"{'ITL (mean):':<24} {_val(res.itl_ms_mean, 'ms')}",
+        f"{'ITL (p50):':<24} {_val(res.itl_ms_p50, 'ms')}",
+        f"{'ITL (p90):':<24} {_val(res.itl_ms_p90, 'ms')}",
+        f"{'ITL (p99):':<24} {_val(res.itl_ms_p99, 'ms')}",
+        f"{'Throughput:':<24} {_val(res.throughput_tokens_per_sec, 'tokens/sec')}",
+        f"{'Total Latency:':<24} {_val(res.total_latency_ms, 'ms')}",
+        f"{'Peak Allocator Memory:':<24} {_val(res.peak_vram_used_mb, 'MB')}",
+    ]
+
+    if res.error_message:
+        lines.extend(["", f"{'Error Message:':<24} {res.error_message}"])
+
     return "\n".join(lines)
 
 
@@ -447,6 +557,103 @@ def main(args: Optional[List[str]] = None) -> int:
                 else:
                     sys.stdout.write(_format_run_result(run_result) + "\n")
                 return 0
+            finally:
+                runner.unload()
+
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error: {exc}\n")
+            return 1
+
+    if parsed_args.command == "benchmark":
+        target_model_id = parsed_args.model_id or parsed_args.model_opt
+        if not target_model_id:
+            sys.stderr.write("Error: model_id must be provided to 'rocmhub benchmark'.\n")
+            return 1
+
+        try:
+            # 1. Inspect model metadata (resolves immutable commit SHA, no weights downloaded)
+            source = HuggingFaceModelSource()
+            inspector = ModelInspector(source=source)
+            model_spec = inspector.inspect(
+                model_id=target_model_id,
+                revision=parsed_args.revision,
+            )
+
+            # 2. Observe system hardware and runtime environment
+            observer = SystemObserver()
+            detection = observer.observe()
+
+            # 3. Preflight capability evaluation
+            evaluator = CapabilityEvaluator()
+            capability_report = evaluator.evaluate(model=model_spec, detection=detection)
+
+            # 4. Check preflight verdict: ONLY proceed if READY!
+            if capability_report.verdict != EvaluationVerdict.READY:
+                error_msg = (
+                    f"Benchmark skipped: preflight verdict is {capability_report.verdict.value}."
+                )
+                skipped_bench_result = BenchmarkResult(
+                    status=ExecutionStatus.SKIPPED,
+                    error_message=error_msg,
+                    model_id=model_spec.model_id,
+                    model_revision=model_spec.commit_sha,
+                    device_id=parsed_args.device,
+                    runtime_name="pytorch_transformers_hip",
+                    precision=parsed_args.precision,
+                    warmup_runs=parsed_args.warmup_runs,
+                    measurement_runs_requested=parsed_args.runs,
+                    measurement_runs_completed=0,
+                    failed_runs=0,
+                )
+
+                if parsed_args.json:
+                    sys.stdout.write(skipped_bench_result.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(
+                        f"Preflight Check: {capability_report.verdict.value}\n"
+                        f"{error_msg}\n\n"
+                        "Reasons:\n"
+                    )
+                    for r in capability_report.reasons:
+                        sys.stdout.write(f"  [{r.severity.value.upper()}] {r.code}: {r.message}\n")
+                    sys.stdout.write("\nModel weights were NOT downloaded and benchmark was NOT executed.\n")
+
+                verdict_exit_codes = {
+                    EvaluationVerdict.NO_ACCELERATOR: 2,
+                    EvaluationVerdict.BLOCKED: 3,
+                    EvaluationVerdict.UNKNOWN: 4,
+                }
+                return verdict_exit_codes.get(capability_report.verdict, 1)
+
+            # 5. Preflight is READY: proceed to benchmark execution
+            bench_config = BenchmarkConfig(
+                prompt=parsed_args.prompt,
+                max_new_tokens=parsed_args.max_new_tokens,
+                warmup_runs=parsed_args.warmup_runs,
+                measurement_runs=parsed_args.runs,
+                precision=parsed_args.precision,
+                device_id=parsed_args.device,
+            )
+
+            runner = HuggingFaceRunner()
+            try:
+                runner.load(
+                    model=model_spec,
+                    device_id=parsed_args.device,
+                    precision=parsed_args.precision,
+                )
+                harness = BenchmarkHarness(runner=runner, config=bench_config)
+                benchmark_result = harness.run(model=model_spec)
+
+                if parsed_args.json:
+                    sys.stdout.write(benchmark_result.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_benchmark_result(benchmark_result) + "\n")
+
+                return 0 if benchmark_result.status == ExecutionStatus.SUCCESS else 1
             finally:
                 runner.unload()
 

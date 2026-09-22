@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { JobResponse, JobResultResponse, JobEvent } from '../../api/types';
-import { createJob, fetchJobResult, cancelJob } from '../../api/client';
+import { createJob, fetchJob, fetchJobResult, cancelJob } from '../../api/client';
 import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
@@ -8,10 +8,11 @@ import { LogViewer } from '../common/LogViewer';
 import { Gauge, Play, XCircle } from 'lucide-react';
 
 interface OptimizationLabViewProps {
+  selectedJobId?: string | null;
   onJobCreated?: (jobId: string) => void;
 }
 
-export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ onJobCreated }) => {
+export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ selectedJobId, onJobCreated }) => {
   const [modelId, setModelId] = useState('Qwen/Qwen2.5-0.5B-Instruct');
   const [objective, setObjective] = useState('MAX_THROUGHPUT');
   const [strategies, setStrategies] = useState<string[]>(['fp16', 'bf16']);
@@ -21,6 +22,67 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ onJobC
   const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+
+  // Load existing selected job if requested from Dashboard
+  useEffect(() => {
+    if (!selectedJobId) return;
+    let unsubscribe: (() => void) | null = null;
+    let isCancelled = false;
+
+    async function loadSelectedJob() {
+      try {
+        const job = await fetchJob(selectedJobId!);
+        if (isCancelled) return;
+        setActiveJob(job);
+        if (job.model_id) setModelId(job.model_id);
+
+        if (job.status === 'SUCCEEDED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+          const res = await fetchJobResult(selectedJobId!);
+          if (!isCancelled) setJobResult(res);
+        } else {
+          unsubscribe = subscribeToJobEvents(selectedJobId!, {
+            onEvent: (evt) => {
+              if (!isCancelled) {
+                setJobEvents((prev) => [...prev, evt]);
+                const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(evt.status) || evt.phase === 'COMPLETED';
+                if (isTerminal) {
+                  if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(evt.status)) {
+                    setActiveJob((prev) => (prev ? { ...prev, status: evt.status as any } : prev));
+                  }
+                  fetchJobResult(selectedJobId!)
+                    .then((res) => {
+                      if (!isCancelled) {
+                        setJobResult(res);
+                        setActiveJob((prev) =>
+                          prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
+                        );
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }
+            },
+            onComplete: async () => {
+              try {
+                const res = await fetchJobResult(selectedJobId!);
+                if (!isCancelled) setJobResult(res);
+              } catch (e) {
+                console.warn(e);
+              }
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load selected job:', err);
+      }
+    }
+
+    loadSelectedJob();
+    return () => {
+      isCancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [selectedJobId]);
 
   const toggleStrategy = (strat: string) => {
     if (strategies.includes(strat)) {
@@ -53,8 +115,19 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ onJobC
       subscribeToJobEvents(job.job_id, {
         onEvent: (event) => {
           setJobEvents((prev) => [...prev, event]);
-          if (event.status === 'SUCCEEDED' || event.status === 'FAILED' || event.status === 'CANCELLED') {
-            setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+          const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status) || event.phase === 'COMPLETED';
+          if (isTerminal) {
+            if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status)) {
+              setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+            }
+            fetchJobResult(job.job_id)
+              .then((res) => {
+                setJobResult(res);
+                setActiveJob((prev) =>
+                  prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
+                );
+              })
+              .catch(() => {});
           }
         },
         onComplete: async () => {
@@ -204,11 +277,18 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ onJobC
           {jobResult && (
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-mono font-semibold text-content-primary uppercase tracking-wider">
-                  Candidate Comparison Table
-                </h4>
+                <div className="flex items-center space-x-2">
+                  <h4 className="text-xs font-mono font-semibold text-content-primary uppercase tracking-wider">
+                    Candidate Comparison Table
+                  </h4>
+                  {jobResult.result?.best_candidate_id && (
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-mono border border-emerald-500/30">
+                      Best: {jobResult.result.best_candidate_id}
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs font-mono text-zinc-500">
-                  Status: {jobResult.domain_status || 'CONFIG_ONLY'}
+                  Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}
                 </span>
               </div>
 
@@ -222,43 +302,79 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ onJobC
                       <th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2">Throughput</th>
                       <th className="px-3 py-2">TTFT</th>
-                      <th className="px-3 py-2">Quality Gate</th>
+                      <th className="px-3 py-2">Verdict</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-surface-border">
                     {/* Baseline row */}
                     <tr className="hover:bg-surface-elevated/40">
                       <td className="px-3 py-2.5 font-semibold text-zinc-200">Baseline</td>
-                      <td className="px-3 py-2.5 text-zinc-400">Default (FP32)</td>
+                      <td className="px-3 py-2.5 text-zinc-400">
+                        {jobResult.result?.baseline?.precision?.toUpperCase() || 'FP16'} (Standard)
+                      </td>
                       <td className="px-3 py-2.5">
-                        <DomainStatusTag status={jobResult.domain_status || 'CONFIG_ONLY'} />
+                        <DomainStatusTag status={jobResult.result?.baseline?.status || jobResult.domain_status || 'CONFIG_ONLY'} />
                       </td>
                       <td className="px-3 py-2.5 text-zinc-500">
-                        <DomainStatusTag status="NOT_MEASURED" />
+                        {jobResult.result?.baseline?.benchmark_result?.throughput_tokens_per_sec != null
+                          ? `${Number(jobResult.result.baseline.benchmark_result.throughput_tokens_per_sec).toFixed(1)} tok/s`
+                          : <DomainStatusTag status="NOT_MEASURED" />}
                       </td>
                       <td className="px-3 py-2.5 text-zinc-500">
-                        <DomainStatusTag status="NOT_MEASURED" />
+                        {jobResult.result?.baseline?.benchmark_result?.ttft_ms != null
+                          ? `${Number(jobResult.result.baseline.benchmark_result.ttft_ms).toFixed(1)} ms`
+                          : <DomainStatusTag status="NOT_MEASURED" />}
                       </td>
-                      <td className="px-3 py-2.5 text-zinc-400">PASS</td>
+                      <td className="px-3 py-2.5 text-zinc-400">REFERENCE</td>
                     </tr>
 
                     {/* Explored Candidates */}
-                    {strategies.map((strat, idx) => (
-                      <tr key={strat} className="hover:bg-surface-elevated/40">
-                        <td className="px-3 py-2.5 font-semibold text-zinc-300">Candidate #{idx + 1}</td>
-                        <td className="px-3 py-2.5 uppercase text-zinc-200">{strat}</td>
-                        <td className="px-3 py-2.5">
-                          <DomainStatusTag status="CONFIG_ONLY" />
-                        </td>
-                        <td className="px-3 py-2.5 text-zinc-500">
-                          <DomainStatusTag status="NOT_MEASURED" />
-                        </td>
-                        <td className="px-3 py-2.5 text-zinc-500">
-                          <DomainStatusTag status="NOT_MEASURED" />
-                        </td>
-                        <td className="px-3 py-2.5 text-zinc-400">PENDING</td>
-                      </tr>
-                    ))}
+                    {jobResult.result?.candidates && Array.isArray(jobResult.result.candidates) && jobResult.result.candidates.length > 0
+                      ? jobResult.result.candidates.map((cand: any, idx: number) => {
+                          const comp = jobResult.result?.comparisons?.find(
+                            (c: any) => c.candidate_id === cand.candidate_id
+                          );
+                          return (
+                            <tr key={cand.candidate_id || idx} className="hover:bg-surface-elevated/40">
+                              <td className="px-3 py-2.5 font-semibold text-zinc-300">
+                                {cand.candidate_id}
+                              </td>
+                              <td className="px-3 py-2.5 uppercase text-zinc-200">{cand.strategy}</td>
+                              <td className="px-3 py-2.5">
+                                <DomainStatusTag status={cand.status || 'CONFIG_ONLY'} />
+                              </td>
+                              <td className="px-3 py-2.5 text-zinc-500">
+                                {cand.benchmark_result?.throughput_tokens_per_sec != null
+                                  ? `${Number(cand.benchmark_result.throughput_tokens_per_sec).toFixed(1)} tok/s`
+                                  : <DomainStatusTag status="NOT_MEASURED" />}
+                              </td>
+                              <td className="px-3 py-2.5 text-zinc-500">
+                                {cand.benchmark_result?.ttft_ms != null
+                                  ? `${Number(cand.benchmark_result.ttft_ms).toFixed(1)} ms`
+                                  : <DomainStatusTag status="NOT_MEASURED" />}
+                              </td>
+                              <td className="px-3 py-2.5 text-zinc-300">
+                                {comp?.verdict || (cand.measured ? 'EVALUATED' : 'NOT_MEASURED')}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      : strategies.map((strat, idx) => (
+                          <tr key={strat} className="hover:bg-surface-elevated/40">
+                            <td className="px-3 py-2.5 font-semibold text-zinc-300">Candidate #{idx + 1}</td>
+                            <td className="px-3 py-2.5 uppercase text-zinc-200">{strat}</td>
+                            <td className="px-3 py-2.5">
+                              <DomainStatusTag status="CONFIG_ONLY" />
+                            </td>
+                            <td className="px-3 py-2.5 text-zinc-500">
+                              <DomainStatusTag status="NOT_MEASURED" />
+                            </td>
+                            <td className="px-3 py-2.5 text-zinc-500">
+                              <DomainStatusTag status="NOT_MEASURED" />
+                            </td>
+                            <td className="px-3 py-2.5 text-zinc-400">NOT_MEASURED</td>
+                          </tr>
+                        ))}
                   </tbody>
                 </table>
               </div>

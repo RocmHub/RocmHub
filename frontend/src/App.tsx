@@ -11,6 +11,7 @@ import { OptimizationLabView } from './components/optimization/OptimizationLabVi
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedModelForForge, setSelectedModelForForge] = useState({
     modelId: 'Qwen/Qwen2.5-0.5B-Instruct',
     revision: 'main',
@@ -69,15 +70,22 @@ export const App: React.FC = () => {
         health={health ?? null}
         isLoading={isLoadingHealth}
         isError={isHealthError}
+        isMobileMenuOpen={isMobileMenuOpen}
+        onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
       />
 
       {/* Main Content Layout */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Left Sidebar */}
-        <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          isOpenMobile={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
+        />
 
         {/* View Container */}
-        <main className="flex-1 overflow-y-auto p-6 bg-background">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-background">
           {activeTab === 'dashboard' && (
             <DashboardView
               health={health ?? null}
@@ -105,11 +113,17 @@ export const App: React.FC = () => {
           )}
 
           {activeTab === 'engineer' && (
-            <AIEngineerView onJobCreated={handleJobCreated} />
+            <AIEngineerView
+              selectedJobId={selectedJobId}
+              onJobCreated={handleJobCreated}
+            />
           )}
 
           {activeTab === 'optimization' && (
-            <OptimizationLabView onJobCreated={handleJobCreated} />
+            <OptimizationLabView
+              selectedJobId={selectedJobId}
+              onJobCreated={handleJobCreated}
+            />
           )}
         </main>
       </div>

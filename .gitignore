@@ -54,11 +54,14 @@ htmlcov/
 /artifacts/
 /builds/
 /forge_builds/
+/optimizations/
 .rocmhub/
 .cache/
 *.log
 
 # Node / Frontend
+node_modules
 node_modules/
 frontend/dist/
 frontend/.vite/
+

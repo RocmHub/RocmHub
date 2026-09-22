@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { ForgePlan, JobResponse, JobResultResponse, JobEvent } from '../../api/types';
-import { createForgePlan, createJob, fetchJobResult, cancelJob } from '../../api/client';
+import { createForgePlan, createJob, fetchJob, fetchJobResult, cancelJob } from '../../api/client';
 import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
@@ -17,6 +17,7 @@ interface ForgeStudioViewProps {
 export const ForgeStudioView: React.FC<ForgeStudioViewProps> = ({
   initialModelId = 'Qwen/Qwen2.5-0.5B-Instruct',
   initialRevision = 'main',
+  selectedJobId,
   onJobCreated,
 }) => {
   const [modelId, setModelId] = useState(initialModelId);
@@ -37,6 +38,55 @@ export const ForgeStudioView: React.FC<ForgeStudioViewProps> = ({
     if (initialModelId) setModelId(initialModelId);
     if (initialRevision) setRevision(initialRevision);
   }, [initialModelId, initialRevision]);
+
+  // Load existing selected job if requested from Dashboard
+  useEffect(() => {
+    if (!selectedJobId) return;
+    let unsubscribe: (() => void) | null = null;
+    let isCancelled = false;
+
+    async function loadSelectedJob() {
+      try {
+        const job = await fetchJob(selectedJobId!);
+        if (isCancelled) return;
+        setActiveJob(job);
+        if (job.model_id) setModelId(job.model_id);
+        if (job.revision) setRevision(job.revision);
+
+        if (job.status === 'SUCCEEDED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+          const res = await fetchJobResult(selectedJobId!);
+          if (!isCancelled) setJobResult(res);
+        } else {
+          unsubscribe = subscribeToJobEvents(selectedJobId!, {
+            onEvent: (evt) => {
+              if (!isCancelled) {
+                setJobEvents((prev) => [...prev, evt]);
+                if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(evt.status)) {
+                  setActiveJob((prev) => (prev ? { ...prev, status: evt.status as any } : prev));
+                }
+              }
+            },
+            onComplete: async () => {
+              try {
+                const res = await fetchJobResult(selectedJobId!);
+                if (!isCancelled) setJobResult(res);
+              } catch (e) {
+                console.warn(e);
+              }
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load selected job:', err);
+      }
+    }
+
+    loadSelectedJob();
+    return () => {
+      isCancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [selectedJobId]);
 
   // Handle plan generation
   const handleGeneratePlan = async () => {
@@ -80,8 +130,19 @@ export const ForgeStudioView: React.FC<ForgeStudioViewProps> = ({
       subscribeToJobEvents(job.job_id, {
         onEvent: (event) => {
           setJobEvents((prev) => [...prev, event]);
-          if (event.status === 'SUCCEEDED' || event.status === 'FAILED' || event.status === 'CANCELLED') {
-            setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+          const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status) || event.phase === 'COMPLETED';
+          if (isTerminal) {
+            if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status)) {
+              setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+            }
+            fetchJobResult(job.job_id)
+              .then((res) => {
+                setJobResult(res);
+                setActiveJob((prev) =>
+                  prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
+                );
+              })
+              .catch(() => {});
           }
         },
         onComplete: async () => {

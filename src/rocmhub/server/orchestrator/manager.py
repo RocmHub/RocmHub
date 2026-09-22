@@ -308,6 +308,17 @@ class JobManager:
                     error_code=error_code,
                     revision=resolved_revision,
                 )
+                self.emit_event(
+                    job_id=job_id,
+                    phase="COMPLETED",
+                    status=job_status.value,
+                    message=f"Job {job_id} finished with status {job_status.value}",
+                    error_code=error_code,
+                    details={
+                        "domain_status": domain_status,
+                        "output_dir": resolved_output_dir or output_dir,
+                    },
+                )
             except Exception as exc:
                 logger.exception("Unexpected error in worker loop for job %s", job_id)
                 completed_at = datetime.now(timezone.utc).isoformat()
@@ -318,7 +329,13 @@ class JobManager:
                     error_message=str(exc),
                     error_code="WORKER_EXCEPTION",
                 )
-                emit("SYSTEM", "FAILED", f"Worker error: {exc}", "WORKER_EXCEPTION")
+                self.emit_event(
+                    job_id=job_id,
+                    phase="COMPLETED",
+                    status=JobStatus.FAILED.value,
+                    message=f"Worker error: {exc}",
+                    error_code="WORKER_EXCEPTION",
+                )
             finally:
                 self._release_dir_lock(output_dir)
                 self._cancellation_events.pop(job_id, None)

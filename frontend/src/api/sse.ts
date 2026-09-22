@@ -40,15 +40,17 @@ export function subscribeToJobEvents(
 
         options.onEvent(parsed);
 
-        // Check terminal state
-        if (
+        // Check terminal state: only job-level terminal states, not step-level SUCCESS
+        const isTerminal =
           parsed.status === 'SUCCEEDED' ||
           parsed.status === 'FAILED' ||
           parsed.status === 'CANCELLED' ||
+          parsed.phase === 'COMPLETED' ||
           e.type === 'job_completed' ||
           e.type === 'job_failed' ||
-          e.type === 'job_cancelled'
-        ) {
+          e.type === 'job_cancelled';
+
+        if (isTerminal) {
           cleanup();
           options.onComplete?.();
         }
@@ -76,10 +78,25 @@ export function subscribeToJobEvents(
       reconnectAttempts = 0;
     };
 
-    eventSource.onerror = () => {
+    eventSource.onerror = async () => {
       if (isClosed) return;
       eventSource?.close();
       eventSource = null;
+
+      // Check if job completed cleanly on backend before triggering reconnection backoff
+      try {
+        const checkRes = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+        if (checkRes.ok) {
+          const jobData = await checkRes.json();
+          if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(jobData.status)) {
+            cleanup();
+            options.onComplete?.();
+            return;
+          }
+        }
+      } catch {
+        // proceed with reconnection attempt
+      }
 
       if (reconnectAttempts < maxAttempts) {
         reconnectAttempts++;

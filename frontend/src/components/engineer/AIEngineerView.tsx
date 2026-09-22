@@ -1,17 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { JobResponse, JobResultResponse, JobEvent } from '../../api/types';
-import { createJob, fetchJobResult, cancelJob } from '../../api/client';
+import { createJob, fetchJob, fetchJobResult, cancelJob } from '../../api/client';
 import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
-import { Bot, Play, XCircle, CheckCircle2 } from 'lucide-react';
+import { Bot, Play, XCircle, CheckCircle2, Clock, RotateCcw, AlertCircle } from 'lucide-react';
 
 interface AIEngineerViewProps {
+  selectedJobId?: string | null;
   onJobCreated?: (jobId: string) => void;
 }
 
-export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) => {
+export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, onJobCreated }) => {
   const [modelId, setModelId] = useState('Qwen/Qwen2.5-0.5B-Instruct');
   const [objective, setObjective] = useState('BASE_PREPARATION');
   const [maxAttempts, setMaxAttempts] = useState(5);
@@ -22,6 +23,67 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
   const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+
+  // Load existing selected job if requested from Dashboard
+  useEffect(() => {
+    if (!selectedJobId) return;
+    let unsubscribe: (() => void) | null = null;
+    let isCancelled = false;
+
+    async function loadSelectedJob() {
+      try {
+        const job = await fetchJob(selectedJobId!);
+        if (isCancelled) return;
+        setActiveJob(job);
+        if (job.model_id) setModelId(job.model_id);
+
+        if (job.status === 'SUCCEEDED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+          const res = await fetchJobResult(selectedJobId!);
+          if (!isCancelled) setJobResult(res);
+        } else {
+          unsubscribe = subscribeToJobEvents(selectedJobId!, {
+            onEvent: (evt) => {
+              if (!isCancelled) {
+                setJobEvents((prev) => [...prev, evt]);
+                const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(evt.status) || evt.phase === 'COMPLETED';
+                if (isTerminal) {
+                  if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(evt.status)) {
+                    setActiveJob((prev) => (prev ? { ...prev, status: evt.status as any } : prev));
+                  }
+                  fetchJobResult(selectedJobId!)
+                    .then((res) => {
+                      if (!isCancelled) {
+                        setJobResult(res);
+                        setActiveJob((prev) =>
+                          prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
+                        );
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }
+            },
+            onComplete: async () => {
+              try {
+                const res = await fetchJobResult(selectedJobId!);
+                if (!isCancelled) setJobResult(res);
+              } catch (e) {
+                console.warn(e);
+              }
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load selected job:', err);
+      }
+    }
+
+    loadSelectedJob();
+    return () => {
+      isCancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [selectedJobId]);
 
   const handleLaunch = async () => {
     setIsStarting(true);
@@ -45,8 +107,19 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
       subscribeToJobEvents(job.job_id, {
         onEvent: (event) => {
           setJobEvents((prev) => [...prev, event]);
-          if (event.status === 'SUCCEEDED' || event.status === 'FAILED' || event.status === 'CANCELLED') {
-            setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+          const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status) || event.phase === 'COMPLETED';
+          if (isTerminal) {
+            if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(event.status)) {
+              setActiveJob((prev) => (prev ? { ...prev, status: event.status as any } : prev));
+            }
+            fetchJobResult(job.job_id)
+              .then((res) => {
+                setJobResult(res);
+                setActiveJob((prev) =>
+                  prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
+                );
+              })
+              .catch(() => {});
           }
         },
         onComplete: async () => {
@@ -136,13 +209,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
               min={1}
               max={10}
               value={maxAttempts}
-              onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 3)}
+              onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 5)}
               className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-mono text-content-secondary">Execution Budget (Minutes)</label>
+            <label className="text-xs font-mono text-content-secondary">Timeout (Minutes)</label>
             <input
               type="number"
               min={1}
@@ -158,7 +231,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
             <input
               type="number"
               min={1}
-              max={50}
+              max={100}
               value={maxDiskGb}
               onChange={(e) => setMaxDiskGb(parseInt(e.target.value) || 10)}
               className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
@@ -168,7 +241,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
 
         <div className="flex items-center justify-between pt-2 border-t border-surface-border">
           <div className="text-[11px] font-mono text-zinc-500">
-            Safety Boundary: Zero arbitrary shell access • Structured tool actions only
+            Safety Boundary: Sandboxed workspace with strict disk, time, and cycle guards.
           </div>
           <button
             onClick={handleLaunch}
@@ -176,7 +249,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
             className="flex items-center space-x-2 px-4 py-2 rounded bg-accent-red hover:bg-accent-red-hover text-white text-xs font-medium transition-colors disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isStarting ? 'Initiating Agent...' : 'Launch AI Engineer'}</span>
+            <span>{isStarting ? 'Launching Agent...' : 'Launch AI Engineer Session'}</span>
           </button>
         </div>
       </div>
@@ -208,36 +281,130 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ onJobCreated }) 
 
           {/* Final Agent Report */}
           {jobResult && (
-            <div className="p-4 rounded bg-[#131317] border border-surface-border space-y-3 text-xs font-mono">
-              <div className="flex items-center justify-between">
+            <div className="p-4 rounded bg-[#131317] border border-surface-border space-y-4 text-xs font-mono">
+              <div className="flex items-center justify-between border-b border-surface-border pb-2">
                 <span className="font-semibold text-emerald-400 flex items-center space-x-1.5">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Agent Loop Finished — Status: {jobResult.domain_status || 'CONFIG_ONLY'}</span>
+                  <span>Agent Session Finished — Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}</span>
                 </span>
                 <span className="text-zinc-500">
                   {jobResult.completed_at ? new Date(jobResult.completed_at).toLocaleTimeString() : ''}
                 </span>
               </div>
 
-              {jobResult.result?.summary && (
-                <div className="p-3 rounded bg-surface-elevated border border-surface-border text-zinc-300">
-                  <div className="text-zinc-500 text-[11px] uppercase mb-1">Agent Executive Summary</div>
-                  {jobResult.result.summary}
+              {/* Report Metrics Bar */}
+              {jobResult.result && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
+                      <Clock className="w-3 h-3" />
+                      <span>Duration</span>
+                    </div>
+                    <div className="text-zinc-200 font-semibold">
+                      {jobResult.result.total_duration_seconds !== undefined
+                        ? `${Number(jobResult.result.total_duration_seconds).toFixed(2)}s`
+                        : 'N/A'}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Attempts</span>
+                    </div>
+                    <div className="text-zinc-200 font-semibold">
+                      {jobResult.result.attempts_used !== undefined
+                        ? `${jobResult.result.attempts_used}`
+                        : 'N/A'}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                    <div className="text-zinc-500 text-[10px] uppercase">Target GPU</div>
+                    <div className="text-zinc-200 font-semibold truncate">
+                      {jobResult.result.target_gpu || 'Auto / None'}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                    <div className="text-zinc-500 text-[10px] uppercase">Build Manifest</div>
+                    <div className="text-emerald-400 font-semibold">
+                      {jobResult.result.build_manifest?.status || 'CONFIG_ONLY'}
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {jobResult.result?.iterations && Array.isArray(jobResult.result.iterations) && (
-                <div className="space-y-1.5 pt-2">
-                  <div className="text-zinc-400 uppercase text-[11px]">Iterations Executed:</div>
-                  {jobResult.result.iterations.map((iter: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className="p-2 rounded bg-surface-elevated border border-surface-border flex items-center justify-between"
-                    >
-                      <span className="text-zinc-300">Attempt {idx + 1}: {iter.action || 'Execute step'}</span>
-                      <span className="text-zinc-500">{iter.status || 'OK'}</span>
-                    </div>
-                  ))}
+              {/* Executive Reasons List */}
+              {jobResult.result?.reasons && Array.isArray(jobResult.result.reasons) && jobResult.result.reasons.length > 0 && (
+                <div className="p-3 rounded bg-surface-elevated border border-surface-border space-y-1.5">
+                  <div className="text-zinc-400 text-[11px] uppercase font-semibold">Decision Rationale & Executive Summary</div>
+                  <ul className="space-y-1 text-zinc-300">
+                    {jobResult.result.reasons.map((reason: string, idx: number) => (
+                      <li key={idx} className="flex items-start space-x-2">
+                        <span className="text-accent-red font-bold">›</span>
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Errors Handled */}
+              {jobResult.result?.errors_encountered && Array.isArray(jobResult.result.errors_encountered) && jobResult.result.errors_encountered.length > 0 && (
+                <div className="p-3 rounded bg-amber-500/10 border border-amber-500/20 space-y-1.5 text-amber-300">
+                  <div className="text-amber-400 text-[11px] uppercase font-semibold flex items-center space-x-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Diagnostics & Handled Warnings:</span>
+                  </div>
+                  <ul className="space-y-1 text-[11px]">
+                    {jobResult.result.errors_encountered.map((err: string, idx: number) => (
+                      <li key={idx} className="flex items-start space-x-2">
+                        <span>•</span>
+                        <span>{err}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Action Trajectory Trace */}
+              {jobResult.result?.trajectory && Array.isArray(jobResult.result.trajectory) && jobResult.result.trajectory.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-surface-border">
+                  <div className="text-zinc-400 uppercase text-[11px] font-semibold">Agent Action Trajectory:</div>
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {jobResult.result.trajectory.map((step: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded bg-surface-elevated/70 border border-surface-border text-xs space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="px-1.5 py-0.5 rounded bg-black/40 text-zinc-400 text-[10px] font-mono border border-zinc-800">
+                              Step {step.step_index ?? idx + 1}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-accent-red/20 text-accent-red text-[10px] font-mono">
+                              {step.phase}
+                            </span>
+                            <span className="font-semibold text-zinc-200">{step.action}</span>
+                          </div>
+                          {step.duration_seconds !== undefined && (
+                            <span className="text-zinc-500 text-[11px]">{Number(step.duration_seconds).toFixed(2)}s</span>
+                          )}
+                        </div>
+                        {step.observation && (
+                          <div className="text-zinc-400 text-[11px] pl-2 border-l border-zinc-700">
+                            {step.observation}
+                          </div>
+                        )}
+                        {step.rationale && (
+                          <div className="text-zinc-500 text-[10px] pl-2 italic">
+                            Thought: {step.rationale}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

@@ -6,15 +6,15 @@ ROCmHub is an open-source platform designed to automate the preparation, optimiz
 
 ---
 
-## Current Status: Phase 14 (Frontend MVP & Backend Orchestration Complete)
+## Current Status: Phase 15 (Product Acceptance & Polish Complete)
 
-ROCmHub features a complete platform stack:
+ROCmHub features a complete platform stack validated by real Google Chrome E2E browser acceptance testing:
 - **Core Domain Engine**: Model acquisition, static inspection, hardware detection, Benchmark Guard, and reproducible artifact builder.
 - **Model Forge**: Automated preparation and reproducible recipe generation for open causal language models (`pytorch_transformers_hip`).
-- **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery.
-- **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines.
-- **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, and crash recovery.
-- **Frontend MVP**: Responsive React 18 / TypeScript / Vite / Tailwind CSS web application with live SSE logs, telemetry dashboard, model explorer, forge studio, AI engineer workspace, and optimization lab.
+- **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery with structured trajectory and executive reports.
+- **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines (truthful `NOT_MEASURED` semantics on non-ROCm hosts).
+- **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, cooperative cancellation, and crash recovery.
+- **Frontend Workspace**: Responsive React 18 / TypeScript / Vite / Tailwind CSS web application featuring mobile navigation drawer, real-time SSE log streaming, live hardware telemetry, deep linking, model explorer, forge studio, AI engineer workspace, and optimization lab.
 
 For architectural decisions, principles, and roadmap, see:
 - [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -91,6 +91,12 @@ python3 scripts/live_demo_smoke.py
 cd frontend
 npm test
 npm run build
+```
+
+### Real Browser E2E Acceptance Test
+```bash
+# Runs full end-to-end user scenario across desktop and mobile in Google Chrome
+node scripts/browser_e2e.js
 ```
 
 ---

@@ -1,24 +1,41 @@
 import React from 'react';
 import type { HealthResponse } from '../../api/types';
-import { Cpu, AlertTriangle, Layers } from 'lucide-react';
+import { Cpu, AlertTriangle, Layers, Menu, X } from 'lucide-react';
 
 interface NavbarProps {
   health: HealthResponse | null;
   isLoading: boolean;
   isError: boolean;
+  isMobileMenuOpen?: boolean;
+  onToggleMobileMenu?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  health,
+  isLoading,
+  isError,
+  isMobileMenuOpen,
+  onToggleMobileMenu,
+}) => {
   return (
-    <header className="h-14 border-b border-surface-border bg-surface flex items-center justify-between px-6 sticky top-0 z-40">
-      {/* Brand */}
+    <header className="h-14 border-b border-surface-border bg-surface flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
+      {/* Brand & Mobile Toggle */}
       <div className="flex items-center space-x-3">
-        <div className="w-7 h-7 rounded bg-accent-red flex items-center justify-center font-bold text-white text-sm tracking-wider font-mono">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            aria-label="Toggle navigation menu"
+            className="md:hidden p-1.5 rounded bg-surface-elevated text-zinc-300 hover:text-white border border-surface-border"
+          >
+            {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
+        )}
+        <div className="w-7 h-7 rounded bg-accent-red flex items-center justify-center font-bold text-white text-sm tracking-wider font-mono shrink-0">
           RH
         </div>
         <div className="flex items-baseline space-x-2">
           <span className="font-semibold text-content-primary tracking-tight">ROCmHub</span>
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Engineering Platform</span>
+          <span className="hidden sm:inline text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Engineering Platform</span>
         </div>
       </div>
 

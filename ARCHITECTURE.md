@@ -66,6 +66,7 @@ rocmhub/
 ├── artifacts/     # Manifest generation, schema validation, artifact packaging
 ├── guard/         # Independent Benchmark Guard, stability checks, and reproducibility gate
 ├── forge/         # Model Forge: automated model preparation and build execution
+├── engineer/      # Autonomous AI Engineer: observe-plan-act loop & safe tools
 └── cli/           # Developer command-line interface
 ```
 
@@ -187,6 +188,36 @@ rocmhub/
 - **CLI Commands**:
   - `rocmhub forge plan <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--json]`
   - `rocmhub forge build <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--force] [--no-weights] [--execute] [--json]`
+
+### 3.9 `rocmhub.engineer`
+- **Mission**: *Autonomous, policy-bounded AI Engineer preparing open-source models for AMD GPUs.*
+- **Core Loop**: `OBSERVE -> PLAN -> ACT -> EVALUATE -> REVISE`.
+- **Restricted Tool Registry (10 tools)**:
+  - Observation: `inspect_model`, `inspect_hardware`, `check_capability`, `read_build_errors`.
+  - Forge actions: `create_forge_plan`, `materialize_model`, `execute_forge_build`.
+  - Verification actions: `run_baseline`, `run_benchmark`.
+  - Persistence: `save_engineer_report`.
+- **Security Boundary**:
+  - No arbitrary shell, `eval`, `exec`, or Python subprocess execution.
+  - Path traversal validation (`validate_safe_path`) enforcing containment in designated workspaces.
+  - Strict forbidden root prefixes (`/etc`, `/bin`, `/usr`, `/System`, etc.).
+  - Prompt injection sanitization (`sanitize_untrusted_text`) stripping harmful payload tags and override instructions from model card texts.
+- **Deterministic Execution Guard**:
+  - LLM proposes structured actions, but the executor enforces schemas, hardware constraints, and permissions.
+  - LLM cannot set `SUCCESS`, `AMD_VALIDATED`, or `VERIFIED` directly. True executor results dictate state.
+  - Non-AMD environments safely stop at `STOPPED_ENVIRONMENT` or complete preparation cleanly with zero synthetic GPU metrics.
+- **Dual LLM Providers**:
+  - `AutonomousRulesProvider`: 100% deterministic, offline expert decision tree requiring no external API keys or network connection.
+  - `OpenAICompatibleProvider`: Configured via environment variables (`ROCMHUB_LLM_*`) with secret redacting and JSON schema response parsing.
+- **Budget & Loop Detection**:
+  - `BudgetGuard`: Limits maximum step attempts, execution time (seconds), and disk usage (bytes).
+  - `LoopDetector`: Detects identical or oscillating failure patterns and halts with `RepeatedFailureError`.
+  - `FailureClassifier`: Categorizes errors into structured taxonomy (`HARDWARE_MISMATCH`, `DOWNLOAD_FAILURE`, `OUT_OF_MEMORY`, `RECIPE_INCOMPATIBLE`, `ROCM_RUNTIME_ERROR`, `UNKNOWN_FAILURE`).
+- **Memory & Persistence**:
+  - `TrajectoryStore`: Local JSONL trajectory recording step-by-step reasoning, actions, and observations.
+  - Fail-closed secret scrubber redacting tokens and credentials from persisted logs.
+- **CLI Commands**:
+  - `rocmhub engineer <model_id> [--revision] [--target-gpu] [--objective] [--max-attempts] [--max-minutes] [--max-disk-gb] [--allow-full-weights] [--output-dir] [--json]`
 
 ---
 
@@ -531,6 +562,23 @@ RocmHub/
 │       │   ├── harness.py          # Benchmark runner & timing orchestration
 │       │   ├── metrics.py          # TTFT, ITL, throughput calculation
 │       │   └── memory.py           # VRAM allocation monitor
+│       ├── forge/
+│       │   ├── __init__.py
+│       │   ├── base.py             # Build plans, steps, statuses, materialization mode
+│       │   ├── recipes.py          # PyTorchTransformersHipRecipe
+│       │   ├── planner.py          # Hardware & capability-aware build planner
+│       │   ├── materializer.py     # Safe model & weight acquisition
+│       │   ├── manifest.py         # Build manifest serialization & verification
+│       │   └── executor.py         # Step executor & non-AMD safe fallback
+│       ├── engineer/
+│       │   ├── __init__.py
+│       │   ├── base.py             # Trajectory, budget, request, and report schemas
+│       │   ├── agent.py            # Autonomous observe-plan-act loop
+│       │   ├── tools.py            # Restricted tool registry & security boundary
+│       │   ├── provider.py         # Dual LLM providers (Deterministic Rules & OpenAI-compatible)
+│       │   ├── policy.py           # Budget guard, loop detector, failure classifier
+│       │   ├── memory.py           # Local trajectory store & secret scrubber
+│       │   └── reports.py          # Terminal reporting formatters
 │       └── artifacts/
 │           ├── __init__.py
 │           ├── builder.py          # Artifact packaging & manifest generator
@@ -540,9 +588,11 @@ RocmHub/
     │   ├── test_models.py
     │   ├── test_hardware.py
     │   ├── test_benchmarks.py
-    │   └── test_artifacts.py
+    │   ├── test_artifacts.py
+    │   ├── test_forge.py
+    │   └── test_engineer.py
     └── integration/
-        └── test_pipeline_dryrun.py # End-to-end mock execution test
+        └── test_integration_hf.py  # End-to-end live Hugging Face Hub integration tests
 ```
 
 ---
@@ -550,12 +600,13 @@ RocmHub/
 ## 8. Future Extension Points
 
 1. **Benchmark Guard & Reproducibility Gate**: *(Completed in Phase 9)* Independent arbiter auditing measurement stability, environment drift, hardware health, and summary truthfulness.
-2. **Verified Badge / Gate**: Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
-3. **AI Engineer Optimization Agent**: Plugs in after baseline verification. Proposes candidate configs (quantization, runtime backends, kernel configurations) and evaluates against baseline in interleaved A/B/B/A sequences.
-4. **Alternative Runtimes**:
+2. **Model Forge Foundation**: *(Completed in Phase 10)* Deterministic build planning, model materialization, and recipe configuration.
+3. **Autonomous AI Engineer MVP**: *(Completed in Phase 11)* Autonomous preparation of open models on AMD GPUs with bounded execution loop, security boundary, and deterministic fallback.
+4. **Verified Badge / Gate**: *(Phase 12)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
+5. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.
    - `SGLangRunner`: Fast RadixAttention runner.
    - `LlamaCppHipRunner`: Minimal C++ GGUF inference via hipBLAS.
-5. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
-6. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
-7. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
+6. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
+7. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
+8. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.

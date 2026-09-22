@@ -52,5 +52,8 @@ htmlcov/
 
 # ROCmHub local artifacts & cache
 /artifacts/
+/builds/
+/forge_builds/
+.rocmhub/
 .cache/
 *.log

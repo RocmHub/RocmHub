@@ -12,7 +12,9 @@ from rocmhub.cli.main import main
 from rocmhub.core.errors import (
     AuthRequiredError,
     BuildConflictError,
+    BuildExecutionError,
     InsufficientDiskSpaceError,
+    ModelMaterializationError,
     ModelNotFoundError,
     SecretDetectedError,
     UnsupportedModelArchitectureError,
@@ -27,6 +29,7 @@ from rocmhub.core.types import (
 from rocmhub.forge.base import (
     BuildStatus,
     ForgePlan,
+    MaterializationMode,
     MaterializedModel,
     StepStatus,
 )
@@ -40,6 +43,7 @@ from rocmhub.forge.manifest import (
 from rocmhub.forge.materializer import ModelMaterializer
 from rocmhub.forge.planner import ForgePlanner
 from rocmhub.forge.recipes import (
+    TESTED_CAUSAL_LM_ARCHITECTURES,
     PyTorchTransformersHipRecipe,
     get_recipe,
 )
@@ -173,6 +177,30 @@ class TestForgeRecipes:
         assert SAMPLE_COMMIT_SHA in script
         assert "torch.float16" in script
         assert "AutoModelForCausalLM" in script
+
+    def test_tested_causal_lm_architectures_whitelist(self) -> None:
+        recipe = PyTorchTransformersHipRecipe()
+        for arch in TESTED_CAUSAL_LM_ARCHITECTURES:
+            spec = ModelSpec(
+                model_id=f"test/{arch}",
+                requested_revision="main",
+                commit_sha=SAMPLE_COMMIT_SHA,
+                architecture=arch,
+            )
+            assert recipe.matches(spec) is True
+
+    def test_untested_causal_lm_architecture_rejected(self) -> None:
+        recipe = PyTorchTransformersHipRecipe()
+        spec = ModelSpec(
+            model_id="test/untested-model",
+            requested_revision="main",
+            commit_sha=SAMPLE_COMMIT_SHA,
+            architecture="UntestedCustomForCausalLM",
+        )
+        assert recipe.matches(spec) is False
+        with pytest.raises(UnsupportedModelArchitectureError) as exc_info:
+            recipe.validate(spec, "fp16")
+        assert exc_info.value.details.get("reason_code") == "UNTESTED_ARCHITECTURE"
 
 
 # ==============================================================================
@@ -335,9 +363,137 @@ class TestModelMaterializer:
                 result = materializer.materialize(sample_qwen_spec, download_weights=False)
 
         assert result.local_path == str(snapshot_dir)
+        assert result.mode == MaterializationMode.METADATA_ONLY
+        assert result.has_weights is False
         assert "config.json" in result.files
         assert "tokenizer.json" in result.files
         assert result.weights_size_bytes == 0
+
+    def test_materialize_full_weights_standalone_success(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_full"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "config.json").write_text('{"vocab_size": 100}')
+        (snapshot_dir / "tokenizer.json").write_text('{"version": "1.0"}')
+        (snapshot_dir / "model.safetensors").write_bytes(b"dummy weights" * 100)
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                result = materializer.materialize(sample_qwen_spec, download_weights=True)
+
+        assert result.mode == MaterializationMode.FULL_WEIGHTS
+        assert result.has_weights is True
+        assert result.weights_size_bytes == len(b"dummy weights" * 100)
+
+    def test_materialize_full_weights_sharded_success(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_sharded"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "config.json").write_text('{"vocab_size": 100}')
+        (snapshot_dir / "tokenizer.json").write_text('{"version": "1.0"}')
+        index_data = {
+            "metadata": {"total_size": 200},
+            "weight_map": {
+                "layer.0.weight": "model-00001-of-00002.safetensors",
+                "layer.1.weight": "model-00002-of-00002.safetensors",
+            },
+        }
+        (snapshot_dir / "model.safetensors.index.json").write_text(json.dumps(index_data))
+        (snapshot_dir / "model-00001-of-00002.safetensors").write_bytes(b"shard 1" * 20)
+        (snapshot_dir / "model-00002-of-00002.safetensors").write_bytes(b"shard 2" * 20)
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                result = materializer.materialize(sample_qwen_spec, mode=MaterializationMode.FULL_WEIGHTS)
+
+        assert result.has_weights is True
+        assert result.weights_size_bytes == len(b"shard 1" * 20) + len(b"shard 2" * 20)
+
+    def test_materialize_full_weights_missing_shard_raises(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_missing_shard"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "config.json").write_text('{"vocab_size": 100}')
+        (snapshot_dir / "tokenizer.json").write_text('{"version": "1.0"}')
+        index_data = {
+            "weight_map": {
+                "layer.0.weight": "model-00001-of-00002.safetensors",
+                "layer.1.weight": "model-00002-of-00002.safetensors",
+            }
+        }
+        (snapshot_dir / "model.safetensors.index.json").write_text(json.dumps(index_data))
+        (snapshot_dir / "model-00001-of-00002.safetensors").write_bytes(b"shard 1")
+        # Note: model-00002-of-00002.safetensors is intentionally missing!
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                with pytest.raises(ModelMaterializationError) as exc_info:
+                    materializer.materialize(sample_qwen_spec, mode=MaterializationMode.FULL_WEIGHTS)
+
+        assert "missing shards: model-00002-of-00002.safetensors" in str(exc_info.value)
+
+    def test_materialize_full_weights_empty_shard_raises(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_empty_shard"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "config.json").write_text('{"vocab_size": 100}')
+        (snapshot_dir / "tokenizer.json").write_text('{"version": "1.0"}')
+        index_data = {"weight_map": {"layer.0.weight": "model-00001-of-00001.safetensors"}}
+        (snapshot_dir / "model.safetensors.index.json").write_text(json.dumps(index_data))
+        (snapshot_dir / "model-00001-of-00001.safetensors").write_bytes(b"")  # 0 bytes!
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                with pytest.raises(ModelMaterializationError) as exc_info:
+                    materializer.materialize(sample_qwen_spec, mode=MaterializationMode.FULL_WEIGHTS)
+
+        assert "empty shards: model-00001-of-00001.safetensors" in str(exc_info.value)
+
+    def test_materialize_full_weights_missing_config_raises(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_no_config"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "tokenizer.json").write_text('{"version": "1.0"}')
+        (snapshot_dir / "model.safetensors").write_bytes(b"dummy")
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                with pytest.raises(ModelMaterializationError) as exc_info:
+                    materializer.materialize(sample_qwen_spec, mode=MaterializationMode.FULL_WEIGHTS)
+
+        assert "config.json' missing" in str(exc_info.value)
+
+    def test_materialize_full_weights_missing_tokenizer_raises(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        snapshot_dir = tmp_path / "mock_snapshot_no_tok"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "config.json").write_text('{"vocab_size": 100}')
+        (snapshot_dir / "model.safetensors").write_bytes(b"dummy")
+
+        materializer = ModelMaterializer(cache_dir=tmp_path)
+        with patch("shutil.disk_usage") as mock_usage:
+            mock_usage.return_value = MagicMock(free=100 * 1024**3)
+            with patch("rocmhub.forge.materializer.snapshot_download", return_value=str(snapshot_dir)):
+                with pytest.raises(ModelMaterializationError) as exc_info:
+                    materializer.materialize(sample_qwen_spec, mode=MaterializationMode.FULL_WEIGHTS)
+
+        assert "tokenizer files missing" in str(exc_info.value)
 
 
 # ==============================================================================
@@ -414,7 +570,9 @@ class TestForgeExecutor:
         mock_materializer.check_disk_space.return_value = None
         mock_materializer.materialize.return_value = MaterializedModel(
             local_path=str(mock_snapshot),
+            mode=MaterializationMode.FULL_WEIGHTS,
             files=["config.json", "model.safetensors"],
+            has_weights=True,
             weights_size_bytes=20,
             cached=True,
         )
@@ -492,6 +650,90 @@ class TestForgeExecutor:
         executor = ForgeExecutor()
         with pytest.raises(BuildConflictError):
             executor.execute(plan=plan, model_spec=sample_qwen_spec, force=False)
+
+    def test_execute_config_only_when_no_weights(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec, non_amd_detection_report: DetectionReport
+    ) -> None:
+        build_dir = tmp_path / "config_only_build"
+        mock_snapshot = tmp_path / "hf_meta"
+        mock_snapshot.mkdir(parents=True)
+        (mock_snapshot / "config.json").write_text("{}")
+
+        mock_materializer = MagicMock()
+        mock_materializer.check_disk_space.return_value = None
+        mock_materializer.materialize.return_value = MaterializedModel(
+            local_path=str(mock_snapshot),
+            mode=MaterializationMode.METADATA_ONLY,
+            files=["config.json"],
+            has_weights=False,
+            weights_size_bytes=0,
+            cached=True,
+        )
+
+        plan = ForgePlan(
+            plan_id="plan_config_only",
+            model_id=sample_qwen_spec.model_id,
+            revision=sample_qwen_spec.commit_sha,
+            precision="fp16",
+            recipe_id="pytorch_transformers_hip",
+            recipe_version="1.0.0",
+            output_dir=str(build_dir),
+            estimated_disk_space_bytes=0,
+            steps=PyTorchTransformersHipRecipe().get_steps(),
+        )
+
+        executor = ForgeExecutor(materializer=mock_materializer)
+        manifest = executor.execute(
+            plan=plan,
+            model_spec=sample_qwen_spec,
+            download_weights=False,
+            execute_inference=False,
+        )
+
+        assert manifest.status == BuildStatus.CONFIG_ONLY
+        assert manifest.amd_validated is False
+        assert (build_dir / "runtime_config.json").exists()
+        assert (build_dir / "run_inference.py").exists()
+
+    def test_execute_inference_on_config_only_raises(
+        self, tmp_path: Path, sample_qwen_spec: ModelSpec
+    ) -> None:
+        build_dir = tmp_path / "config_only_inference"
+        mock_snapshot = tmp_path / "hf_meta2"
+        mock_snapshot.mkdir(parents=True)
+
+        mock_materializer = MagicMock()
+        mock_materializer.check_disk_space.return_value = None
+        mock_materializer.materialize.return_value = MaterializedModel(
+            local_path=str(mock_snapshot),
+            mode=MaterializationMode.METADATA_ONLY,
+            files=["config.json"],
+            has_weights=False,
+            weights_size_bytes=0,
+            cached=True,
+        )
+
+        plan = ForgePlan(
+            plan_id="plan_forbid_exec",
+            model_id=sample_qwen_spec.model_id,
+            revision=sample_qwen_spec.commit_sha,
+            precision="fp16",
+            recipe_id="pytorch_transformers_hip",
+            recipe_version="1.0.0",
+            output_dir=str(build_dir),
+            estimated_disk_space_bytes=0,
+            steps=[],
+        )
+
+        executor = ForgeExecutor(materializer=mock_materializer)
+        with pytest.raises(BuildExecutionError) as exc_info:
+            executor.execute(
+                plan=plan,
+                model_spec=sample_qwen_spec,
+                download_weights=False,
+                execute_inference=True,
+            )
+        assert "Inference execution is forbidden when build status is CONFIG_ONLY" in str(exc_info.value)
 
 
 # ==============================================================================
@@ -603,8 +845,10 @@ class TestForgeCLI:
             mock_mat.check_disk_space.return_value = None
             mock_mat.materialize.return_value = MaterializedModel(
                 local_path=str(mock_snapshot),
+                mode=MaterializationMode.METADATA_ONLY,
                 files=["config.json"],
-                weights_size_bytes=100,
+                has_weights=False,
+                weights_size_bytes=0,
                 cached=True,
             )
             mock_mat_cls.return_value = mock_mat
@@ -617,6 +861,6 @@ class TestForgeCLI:
             assert exit_code == 0
             captured = capsys.readouterr()
             assert "ROCmHub Model Forge Build" in captured.out
-            assert "PREPARED" in captured.out
+            assert "CONFIG_ONLY" in captured.out
             assert "AMD Validated:" in captured.out
             assert (build_dir / "build_manifest.json").exists()

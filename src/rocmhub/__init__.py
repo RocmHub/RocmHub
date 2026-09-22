@@ -47,6 +47,14 @@ from rocmhub.core.types import (
     ValidationRunResult,
     ValidationVerdict,
 )
+from rocmhub.engineer import (
+    AIEngineer,
+    EngineerBudget,
+    EngineerObjective,
+    EngineerReport,
+    EngineerRequest,
+    EngineerStatus,
+)
 from rocmhub.forge import (
     BuildManifest,
     BuildStatus,
@@ -131,4 +139,10 @@ __all__ = [
     "ModelMaterializer",
     "BuildManifest",
     "ForgeExecutor",
+    "AIEngineer",
+    "EngineerObjective",
+    "EngineerStatus",
+    "EngineerBudget",
+    "EngineerRequest",
+    "EngineerReport",
 ]

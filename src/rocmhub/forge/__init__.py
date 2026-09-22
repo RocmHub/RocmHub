@@ -6,6 +6,7 @@ from rocmhub.forge.base import (
     BuildStepRecord,
     BuildStepSpec,
     ForgePlan,
+    MaterializationMode,
     MaterializedModel,
     StepStatus,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "StepStatus",
     "BuildStepSpec",
     "BuildStepRecord",
+    "MaterializationMode",
     "MaterializedModel",
     "ForgePlan",
     "ForgeRecipe",

@@ -19,6 +19,7 @@ from rocmhub.forge.base import (
     BuildStatus,
     BuildStepRecord,
     ForgePlan,
+    MaterializationMode,
     StepStatus,
 )
 from rocmhub.forge.manifest import BuildManifest, write_manifest
@@ -136,22 +137,34 @@ class ForgeExecutor:
         # Step 2: materialize_model
         t0 = time.perf_counter()
         try:
+            mat_mode = (
+                MaterializationMode.FULL_WEIGHTS if download_weights else MaterializationMode.METADATA_ONLY
+            )
             materialized = self._materializer.materialize(
                 model_spec=model_spec,
                 required_disk_bytes=plan.estimated_disk_space_bytes,
                 download_weights=download_weights,
+                mode=mat_mode,
             )
             weights_path = materialized.local_path
+            overall_status = (
+                BuildStatus.PREPARED if materialized.has_weights else BuildStatus.CONFIG_ONLY
+            )
             records.append(
                 BuildStepRecord(
                     name="materialize_model",
                     status=StepStatus.SUCCESS,
                     duration_seconds=round(time.perf_counter() - t0, 4),
-                    message=f"Model materialized successfully ({len(materialized.files)} files, cached={materialized.cached}).",
+                    message=(
+                        f"Model materialized successfully ({len(materialized.files)} files, "
+                        f"mode={materialized.mode.value}, cached={materialized.cached})."
+                    ),
                     details={
                         "weights_path": materialized.local_path,
                         "file_count": len(materialized.files),
                         "weights_size_bytes": materialized.weights_size_bytes,
+                        "mode": materialized.mode.value,
+                        "has_weights": materialized.has_weights,
                         "cached": materialized.cached,
                     },
                 )
@@ -305,6 +318,12 @@ class ForgeExecutor:
 
         # Optional inference execution step
         if execute_inference:
+            if overall_status == BuildStatus.CONFIG_ONLY:
+                raise BuildExecutionError(
+                    "Inference execution is forbidden when build status is CONFIG_ONLY (no weights materialized).",
+                    details={"build_id": build_id, "status": overall_status.value},
+                )
+
             report = self._observer.observe()
             has_amd_gpu = any(gpu.gpu_vendor and gpu.gpu_vendor.lower() == "amd" for gpu in report.gpus)
             if not has_amd_gpu:

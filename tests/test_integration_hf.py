@@ -304,3 +304,51 @@ def test_live_forge_plan_qwen_metadata_only(capsys: pytest.CaptureFixture[str]) 
     assert "pytorch_transformers_hip" in captured_text.out
     assert "Planned Build Steps:" in captured_text.out
 
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_engineer_qwen_model_on_current_mac(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Live integration test: rocmhub engineer autonomous run on Mac for Qwen2.5-0.5B.
+
+    Verifies:
+    - Real Hugging Face Hub metadata is fetched (40-character commit SHA resolved).
+    - Real SystemObserver detects Mac host.
+    - Autonomous AI Engineer executes OBSERVE -> PLAN -> ACT -> EVALUATE loop.
+    - Prepares build in CONFIG_ONLY status without downloading weights.
+    - amd_validated is False.
+    - Zero fake GPU execution metrics.
+    - Trajectory and report are saved to disk with zero secrets.
+    """
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    build_dir = tmp_path / "live_engineer_build"
+
+    exit_code = main([
+        "engineer", model_id,
+        "--output-dir", str(build_dir),
+        "--json",
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    report_dict = json.loads(captured.out)
+
+    assert report_dict["status"] == "SUCCESS"
+    assert report_dict["model_id"] == model_id
+    assert len(report_dict["revision"]) == 40
+    assert all(c in "0123456789abcdef" for c in report_dict["revision"])
+    assert report_dict["objective"] == "BASE_PREPARATION"
+    assert report_dict["secret_scan_clean"] is True
+    assert len(report_dict["trajectory"]) >= 5
+
+    # Check Build Manifest
+    manifest_dict = report_dict["build_manifest"]
+    assert manifest_dict is not None
+    assert manifest_dict["status"] == "CONFIG_ONLY"
+    assert manifest_dict["amd_validated"] is False
+    assert (build_dir / "build_manifest.json").exists()
+    assert (build_dir / "runtime_config.json").exists()
+    assert (build_dir / "run_inference.py").exists()
+
+

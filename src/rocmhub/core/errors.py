@@ -271,3 +271,40 @@ class BuildConflictError(ForgeError):
     """Raised when a build output directory already exists and conflict handling fails."""
 
     error_code = "BUILD_CONFLICT"
+
+
+class EngineerError(ROCmHubError):
+    """Base exception for all Autonomous AI Engineer operations."""
+
+    error_code = "ENGINEER_ERROR"
+
+
+class BudgetExceededError(EngineerError):
+    """Raised when engineer budget (time, disk, or attempts) is exhausted."""
+
+    error_code = "BUDGET_EXCEEDED"
+
+
+class RepeatedFailureError(EngineerError):
+    """Raised when repeated failures in the same state are detected."""
+
+    error_code = "REPEATED_FAILURE_LOOP"
+
+
+class SecurityBoundaryError(EngineerError):
+    """Raised when an action violates security sandboxing or path safety rules."""
+
+    error_code = "SECURITY_BOUNDARY_VIOLATION"
+
+
+class LLMProviderError(EngineerError):
+    """Raised when the LLM provider fails, times out, or returns malformed output."""
+
+    error_code = "LLM_PROVIDER_ERROR"
+
+
+class InvalidToolCallError(EngineerError):
+    """Raised when an agent attempts to invoke an unknown or improperly parameterized tool."""
+
+    error_code = "INVALID_TOOL_CALL"
+

@@ -271,13 +271,45 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] Implement `src/rocmhub/forge/executor.py`:
   - `ForgeExecutor.execute()`: executes build steps (`check_prerequisites`, `materialize_model`, `configure_runtime`, `generate_launch_scripts`, `verify_build`).
   - Manages build directory, detects conflicts without `--force` (`BuildConflictError`).
-  - Non-AMD behavior: marks status `PREPARED`, `amd_validated = False`. Execution step cleanly skipped without fake AMD inference.
+  - Strict semantics: `--no-weights` sets `BuildStatus.CONFIG_ONLY` (inference strictly forbidden on `CONFIG_ONLY`).
+  - `PREPARED` requires weight shards, tokenizer, and configs verified present on disk.
+  - Non-AMD behavior: marks status `PREPARED` or `CONFIG_ONLY`, `amd_validated = False`. Real execution step cleanly skipped without fake AMD inference.
 - [x] CLI commands:
   - `rocmhub forge plan <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--json]`
   - `rocmhub forge build <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--force] [--no-weights] [--execute] [--json]`
-- **Verification**: 272 offline unit tests (28 new Phase 10 tests) + 8 live network integration tests (all passing). Ruff clean. Mypy clean.
+- **Verification**: 272 offline unit tests + 8 live network integration tests (all passing). Ruff clean. Mypy clean.
 
-### Phase 11: Verified Gate & Registry Preparation
+### Phase 11: Autonomous AI Engineer MVP (COMPLETED)
+**Objective: Specialized AI Engineer autonomously preparing open-source models for AMD GPUs.**
+- [x] Implement `src/rocmhub/engineer/base.py`:
+  - Data contracts: `EngineerObjective` (`PREPARE_AMD`, `BASELINE_RUN`, `BENCHMARK_AMD`), `EngineerStatus` (`RUNNING`, `SUCCESS`, `STOPPED_ENVIRONMENT`, `BUDGET_EXCEEDED`, `FAILED`).
+  - `EngineerBudget`: `max_attempts` (default 5), `max_execution_time_seconds` (default 600), `max_disk_usage_bytes` (default 10 GB).
+  - `TrajectoryStep`: immutable step recording step index, phase (`OBSERVE`, `PLAN`, `ACT`, `EVALUATE`, `REVISE`), tool call, observation, and status.
+  - `EngineerRequest` and `EngineerReport`.
+- [x] Implement `src/rocmhub/engineer/provider.py`:
+  - `LLMProvider` Protocol.
+  - `AutonomousRulesProvider`: 100% deterministic offline expert decision tree driving the autonomous loop reliably without network/LLM dependencies.
+  - `OpenAICompatibleProvider`: provider reading `ROCMHUB_LLM_*` env vars, zero credential leaks, schema-enforced actions.
+- [x] Implement `src/rocmhub/engineer/tools.py`:
+  - Restricted Tool Registry with 10 tools: `inspect_model`, `inspect_hardware`, `check_capability`, `create_forge_plan`, `materialize_model`, `execute_forge_build`, `run_baseline`, `run_benchmark`, `read_build_errors`, `save_engineer_report`.
+  - Security boundary: strict path traversal validation (`validate_safe_path`), forbidden root prefixes (`FORBIDDEN_PREFIXES`), prompt injection sanitization (`sanitize_untrusted_text`).
+  - No arbitrary shell, Python eval, or system command execution.
+- [x] Implement `src/rocmhub/engineer/policy.py`:
+  - `BudgetGuard`: tracks execution time, step attempts, disk usage against limits.
+  - `LoopDetector`: tracks per-action failure counts and detects repeating/oscillating patterns (prevents ping-pong loops).
+  - `FailureClassifier`: categorizes errors into `HARDWARE_MISMATCH`, `DOWNLOAD_FAILURE`, `OUT_OF_MEMORY`, `RECIPE_INCOMPATIBLE`, `ROCM_RUNTIME_ERROR`, `UNKNOWN_FAILURE`.
+- [x] Implement `src/rocmhub/engineer/memory.py`:
+  - `TrajectoryStore`: logs steps to local `trajectory.jsonl` and final `report.json`.
+  - Fail-closed secret scrubber redacting API keys, Bearer tokens, and secrets from trajectories.
+- [x] Implement `src/rocmhub/engineer/agent.py`:
+  - `AIEngineer`: autonomous control loop `OBSERVE -> PLAN -> ACT -> EVALUATE -> REVISE`.
+  - Deterministic execution guard: LLM cannot mark `SUCCESS` or `AMD_VALIDATED` directly; only real verified executor outputs dictate status.
+  - Non-AMD behavior: cleanly handles non-AMD environment by stopping gracefully at `STOPPED_ENVIRONMENT` or completing model preparation cleanly with zero synthetic GPU metrics.
+- [x] Implement CLI command:
+  - `rocmhub engineer <model_id> [--revision] [--target-gpu] [--objective] [--max-attempts] [--max-minutes] [--max-disk-gb] [--allow-full-weights] [--output-dir] [--json]`
+- **Verification**: 306 unit tests (24 new Phase 11 tests) + 9 live integration tests passing. Ruff clean. Mypy clean. Real CLI execution on macOS verified.
+
+### Phase 12: Verified Gate & Registry Preparation
 - [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
 - [ ] Local and remote registry packaging.
 - **Verification**: End-to-end certification workflow test.

@@ -13,7 +13,7 @@ from rocmhub.forge.base import BuildStepSpec
 
 SUPPORTED_PRECISIONS = ["fp16", "bf16", "fp32"]
 
-STANDARD_CAUSAL_LM_ARCHITECTURES = {
+TESTED_CAUSAL_LM_ARCHITECTURES = {
     "qwen2forcausallm",
     "llamaforcausallm",
     "mistralforcausallm",
@@ -90,15 +90,11 @@ class PyTorchTransformersHipRecipe:
     runtime: str = "pytorch_transformers_hip"
 
     def is_causal_lm(self, model_spec: ModelSpec) -> bool:
-        """Check whether the model architecture represents a causal language model."""
+        """Check whether the model architecture is in the tested causal language models whitelist."""
         if not model_spec.architecture:
             return False
         arch = model_spec.architecture.strip().lower()
-        if arch in STANDARD_CAUSAL_LM_ARCHITECTURES:
-            return True
-        if arch.endswith("forcausallm") or arch.endswith("lmheadmodel"):
-            return True
-        return False
+        return arch in TESTED_CAUSAL_LM_ARCHITECTURES
 
     def matches(self, model_spec: ModelSpec) -> bool:
         """Check if this recipe can build the given model."""
@@ -115,11 +111,12 @@ class PyTorchTransformersHipRecipe:
 
         if not self.matches(model_spec):
             raise UnsupportedModelArchitectureError(
-                f"Model architecture '{model_spec.architecture}' is not supported by recipe '{self.recipe_id}'. "
-                "Only causal language models (text-generation) are currently supported.",
+                f"Model architecture '{model_spec.architecture}' is not tested or supported by recipe '{self.recipe_id}'. "
+                f"Supported tested architectures: {sorted(list(TESTED_CAUSAL_LM_ARCHITECTURES))}",
                 details={
                     "model_id": model_spec.model_id,
                     "architecture": model_spec.architecture,
+                    "reason_code": "UNTESTED_ARCHITECTURE",
                 },
             )
 

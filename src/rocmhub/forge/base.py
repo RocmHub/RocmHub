@@ -19,9 +19,17 @@ def _utc_now_iso() -> str:
 class BuildStatus(str, Enum):
     """Lifecycle status of a forge build."""
 
+    CONFIG_ONLY = "CONFIG_ONLY"
     PREPARED = "PREPARED"
     EXECUTED = "EXECUTED"
     FAILED = "FAILED"
+
+
+class MaterializationMode(str, Enum):
+    """Mode of model file acquisition."""
+
+    METADATA_ONLY = "METADATA_ONLY"
+    FULL_WEIGHTS = "FULL_WEIGHTS"
 
 
 class StepStatus(str, Enum):
@@ -62,7 +70,13 @@ class MaterializedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     local_path: str = Field(..., description="Local directory path where model files reside.")
+    mode: MaterializationMode = Field(
+        default=MaterializationMode.FULL_WEIGHTS, description="Materialization mode."
+    )
     files: List[str] = Field(default_factory=list, description="List of materialized file names.")
+    has_weights: bool = Field(
+        default=False, description="Whether complete weights are verified present."
+    )
     license_name: Optional[str] = Field(default=None, description="Detected license name/identifier.")
     weights_size_bytes: int = Field(default=0, ge=0, description="Total size of weights files in bytes.")
     cached: bool = Field(default=False, description="Whether weights were reused from local HF cache.")

@@ -28,6 +28,14 @@ from rocmhub.core.types import (
     ValidationReport,
     ValidationVerdict,
 )
+from rocmhub.engineer import (
+    AIEngineer,
+    EngineerBudget,
+    EngineerObjective,
+    EngineerRequest,
+    EngineerStatus,
+    format_engineer_report_table,
+)
 from rocmhub.forge import (
     BuildManifest,
     ForgeExecutor,
@@ -484,6 +492,73 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output BuildManifest as pure JSON on stdout.",
     )
 
+    # Command: engineer
+    engineer_parser = subparsers.add_parser(
+        "engineer",
+        help="Run autonomous AI Engineer to prepare, optimize, and evaluate models for AMD ROCm.",
+    )
+    engineer_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Hugging Face model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    engineer_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    engineer_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    engineer_parser.add_argument(
+        "--target-gpu",
+        default=None,
+        help="Target AMD GPU architecture (e.g. gfx90a, gfx1100).",
+    )
+    engineer_parser.add_argument(
+        "--objective",
+        default="BASE_PREPARATION",
+        choices=["BASE_PREPARATION", "FULL_PREPARATION", "AMD_EXECUTION", "MAX_THROUGHPUT", "MIN_LATENCY"],
+        help="Engineering objective (default: 'BASE_PREPARATION').",
+    )
+    engineer_parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=5,
+        help="Maximum number of loop attempts (default: 5).",
+    )
+    engineer_parser.add_argument(
+        "--max-minutes",
+        type=float,
+        default=10.0,
+        help="Maximum session execution time in minutes (default: 10.0).",
+    )
+    engineer_parser.add_argument(
+        "--max-disk-gb",
+        type=float,
+        default=20.0,
+        help="Maximum disk space in GB allowed (default: 20.0).",
+    )
+    engineer_parser.add_argument(
+        "--allow-full-weights",
+        action="store_true",
+        help="Explicitly permit downloading full model weight tensors (default: False).",
+    )
+    engineer_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Custom build output directory.",
+    )
+    engineer_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output EngineerReport as pure JSON on stdout.",
+    )
+
     return parser
 
 
@@ -878,7 +953,7 @@ def _format_build_manifest(manifest: BuildManifest) -> str:
         f"{'Recipe:':<26} {manifest.recipe_id} (v{manifest.recipe_version})",
         f"{'Runtime:':<26} {manifest.runtime}",
         f"{'Build Status:':<26} {manifest.status.value}",
-        f"{'AMD Validated:':<26} {'yes' if manifest.amd_validated else 'no (PREPARED on non-AMD)'}",
+        f"{'AMD Validated:':<26} {'yes' if manifest.amd_validated else 'no'}",
         f"{'Build Directory:':<26} {manifest.build_dir}",
         f"{'Weights Path:':<26} {manifest.weights_path or '(metadata only)'}",
         "",
@@ -1529,6 +1604,48 @@ def main(args: Optional[List[str]] = None) -> int:
             except Exception as exc:
                 sys.stderr.write(f"Unexpected error during forge build: {exc}\n")
                 return 1
+
+    if parsed_args.command == "engineer":
+        model_id = parsed_args.model_opt or parsed_args.model_id
+        if not model_id:
+            sys.stderr.write("Error: Model ID must be specified either as positional argument or via --model.\n")
+            return 1
+
+        try:
+            budget = EngineerBudget(
+                max_attempts=parsed_args.max_attempts,
+                max_execution_time_seconds=parsed_args.max_minutes * 60.0,
+                max_disk_usage_bytes=int(parsed_args.max_disk_gb * (1024**3)),
+                allow_full_weights=parsed_args.allow_full_weights,
+            )
+            request = EngineerRequest(
+                model_id=model_id,
+                revision=parsed_args.revision,
+                target_gpu=parsed_args.target_gpu,
+                objective=EngineerObjective(parsed_args.objective),
+                budget=budget,
+                output_dir=parsed_args.output_dir,
+            )
+            engineer = AIEngineer()
+            engineer_report = engineer.run(request)
+
+            if parsed_args.json:
+                sys.stdout.write(engineer_report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(format_engineer_report_table(engineer_report) + "\n")
+
+            if engineer_report.status in (EngineerStatus.SUCCESS, EngineerStatus.STOPPED_ENVIRONMENT):
+                return 0
+            elif engineer_report.status == EngineerStatus.BUDGET_EXCEEDED:
+                return 2
+            else:
+                return 1
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Engineer error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error in AI Engineer: {exc}\n")
+            return 1
 
     return 0
 

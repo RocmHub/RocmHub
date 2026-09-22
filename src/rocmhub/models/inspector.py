@@ -183,7 +183,7 @@ class ModelInspector:
         return ModelSpec(
             model_id=model_id,
             source=self._source.source_name,
-            requested_revision=revision,
+            requested_revision=revision or "main",
             commit_sha=commit_sha,
             architecture=architecture,
             parameter_count=parameter_count,

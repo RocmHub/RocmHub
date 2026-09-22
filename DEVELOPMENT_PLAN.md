@@ -343,7 +343,38 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - `rocmhub optimize <model_id> [--revision] [--target-gpu] [--objective] [--max-candidates] [--max-minutes] [--allow-full-weights] [--output-dir] [--json]`
 - **Verification**: 327 unit tests (21 new Phase 12 tests) + 10 live integration tests passing. Ruff clean. Mypy clean. Live CLI execution on macOS verified (exits 0 with status `CONFIG_ONLY`, `NOT_MEASURED`, zero synthetic metrics).
 
-### Phase 13: Verified Gate & Registry Preparation (PLANNED)
+### Phase 13: Backend API & Job Orchestration (COMPLETED)
+**Objective: Local FastAPI backend and asynchronous job orchestration engine with SQLite persistence, SSE streaming, and security sandboxing.**
+- [x] Integrate FastAPI and Uvicorn into project packaging (`pyproject.toml`).
+- [x] Implement server configuration and security layer (`src/rocmhub/server/config.py`, `src/rocmhub/server/security.py`):
+  - Localhost binding by default (`127.0.0.1`).
+  - Request body size limit middleware (`max_request_bytes=1MB`, HTTP 413).
+  - Path traversal and system directory protection (`validate_job_path`).
+  - Secret and sensitive token scrubbing (`redact_secrets`, `sanitize_payload`).
+- [x] Implement SQLite persistence with versioned schema migrations (`src/rocmhub/server/orchestrator/db.py`, `src/rocmhub/server/orchestrator/migrations.py`):
+  - `schema_version`, `jobs`, `job_events` tables with WAL mode, foreign keys, and indexes.
+  - Interrupted job recovery on startup (jobs left in `RUNNING` or `QUEUED` marked `FAILED`).
+- [x] Implement local Job Manager and background worker (`src/rocmhub/server/orchestrator/manager.py`, `src/rocmhub/server/orchestrator/worker.py`):
+  - FIFO bounded queue with directory locking to prevent concurrent writes to the same build folder.
+  - Cooperative job cancellation tokens.
+  - Strict separation of HTTP job status (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`) from domain status (`CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `NOT_MEASURED`).
+- [x] Implement Server-Sent Events (SSE) streaming (`src/rocmhub/server/events.py`):
+  - Reconnection support via `Last-Event-ID` header and `?from_event_id` query param.
+  - Heartbeat keep-alive generator (`: ping\n\n`).
+- [x] Implement versioned REST API routes (`src/rocmhub/server/routes/`):
+  - `GET /health`: system platform, hardware, and queue status.
+  - `GET /api/v1/models/{model_id:path}`: model metadata and host GPU summary.
+  - `POST /api/v1/forge/plan`: deterministic build plan generation.
+  - `POST /api/v1/jobs`: asynchronous job submission for `FORGE_BUILD`, `ENGINEER`, `OPTIMIZATION`.
+  - `GET /api/v1/jobs/{job_id}`: job lifecycle metadata.
+  - `GET /api/v1/jobs/{job_id}/events`: SSE progress stream.
+  - `GET /api/v1/jobs/{job_id}/result`: structured domain output payload.
+  - `POST /api/v1/jobs/{job_id}/cancel`: cooperative job cancellation.
+- [x] Implement CLI command:
+  - `rocmhub serve [--host 127.0.0.1] [--port 8000] [--db-path PATH]`
+- **Verification**: 345 unit tests (18 new Phase 13 tests) + 10 live integration tests passing. Ruff clean. Mypy clean (82 files). Real local HTTP smoke test on `127.0.0.1:8765` for `Qwen/Qwen2.5-0.5B-Instruct` verified (SSE events streamed, terminal status `SUCCEEDED`, domain status `CONFIG_ONLY`, zero synthetic metrics).
+
+### Phase 14: Verified Gate & Registry Preparation (PLANNED)
 - [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
 - [ ] Local and remote registry packaging.
 - **Verification**: End-to-end certification workflow test.

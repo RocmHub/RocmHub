@@ -89,6 +89,7 @@ from rocmhub.optimization import (
     OptimizationStrategy,
 )
 from rocmhub.runners import BaseRunner, HuggingFaceRunner
+from rocmhub.server import JobManager, ServerConfig, create_app
 from rocmhub.validation import ValidationConfig, ValidationEvaluator
 
 __all__ = [
@@ -171,4 +172,7 @@ __all__ = [
     "ComparisonEngine",
     "OptimizationExecutor",
     "OptimizationRecipe",
+    "create_app",
+    "ServerConfig",
+    "JobManager",
 ]

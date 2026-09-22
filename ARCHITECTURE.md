@@ -242,6 +242,42 @@ rocmhub/
 - **CLI Command**:
   - `rocmhub optimize <model_id> [--revision] [--target-gpu] [--objective] [--max-candidates] [--max-minutes] [--allow-full-weights] [--output-dir] [--json]`
 
+### 3.11 `rocmhub.server`
+- **Mission**: *Local HTTP backend and asynchronous job orchestration engine enabling programmatic interaction and future web UI control.*
+- **Technology Stack**: FastAPI, Uvicorn, SQLite, Server-Sent Events (SSE).
+- **Core Architecture**:
+  - Reuses existing domain engines (`ForgePlanner`, `ForgeExecutor`, `AIEngineer`, `OptimizationExecutor`, `ModelInspector`). Zero duplicated business logic.
+  - Strict separation of HTTP job status (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`) from domain execution status (`CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `NOT_MEASURED`).
+- **`JobManager`**:
+  - Single local worker thread consuming from a FIFO bounded queue (`queue.Queue`).
+  - Directory locking: in-memory locking preventing parallel writes to the same build/optimization directory.
+  - Cooperative cancellation: per-job cancellation tokens checked at step and loop boundaries.
+  - Restart recovery: interrupted jobs left in `RUNNING` or `QUEUED` state on server crash/restart are cleanly marked `FAILED`.
+- **Persistence (`DatabaseManager`)**:
+  - Lightweight, thread-safe SQLite database with WAL mode and foreign key enforcement.
+  - Versioned migration runner (`schema_version`, `jobs`, `job_events`).
+  - Storing sanitized/relative artifact paths rather than arbitrary user paths.
+- **Server-Sent Events (`sse_event_stream`)**:
+  - Streaming real-time progress events: `job_id`, `sequence`, `phase`, `status`, `message`, `error_code`, `details`.
+  - Reconnection support via `Last-Event-ID` or `?from_event_id` query parameter with missed event replay.
+  - Heartbeat generator (`: ping\n\n`) every 15 seconds.
+- **Security Boundary**:
+  - Binds strictly to `127.0.0.1` by default.
+  - Request size limit middleware rejecting payloads > 1MB with HTTP 413.
+  - Path traversal validation (`validate_job_path`) blocking escapes outside allowed workspaces and system roots.
+  - Secret scrubber redacting tokens, keys, and credentials from progress events and responses.
+- **API Endpoints (`/api/v1`)**:
+  - `GET /health`
+  - `GET /api/v1/models/{model_id:path}`
+  - `POST /api/v1/forge/plan`
+  - `POST /api/v1/jobs`
+  - `GET /api/v1/jobs/{job_id}`
+  - `GET /api/v1/jobs/{job_id}/events`
+  - `GET /api/v1/jobs/{job_id}/result`
+  - `POST /api/v1/jobs/{job_id}/cancel`
+- **CLI Command**:
+  - `rocmhub serve [--host 127.0.0.1] [--port 8000] [--db-path PATH]`
+
 ---
 
 ## 4. Minimal Data Models
@@ -606,10 +642,25 @@ RocmHub/
 │       │   ├── __init__.py
 │       │   ├── base.py             # Optimization request, plan, candidate, baseline, comparison schemas
 │       │   ├── recipes.py          # OptimizationRecipe protocol, BF16, FP16, FP32, TorchCompile, Quantization
-│       │   ├── baseline.py         # Immutable baseline manager & non-AMD safety
-│       │   ├── comparison.py       # ComparisonEngine (speedup, QRR, statistical significance)
-│       │   ├── executor.py         # OptimizationExecutor orchestrating baseline & candidate matrix
-│       │   └── reports.py          # Terminal table formatting
+│       ├── server/
+│       │   ├── __init__.py
+│       │   ├── app.py              # FastAPI application factory, lifespan, CORS, size limits
+│       │   ├── config.py           # ServerConfig model (host, port, db_path, allowed_workspaces)
+│       │   ├── security.py         # validate_job_path, redact_secrets, sanitize_payload
+│       │   ├── events.py           # SSE formatting, heartbeat, reconnection replay
+│       │   ├── orchestrator/
+│       │   │   ├── __init__.py
+│       │   │   ├── models.py       # JobType, JobStatus, JobCreateRequest, JobResponse, JobEvent
+│       │   │   ├── db.py           # DatabaseManager (SQLite connection, WAL mode, CRUD)
+│       │   │   ├── migrations.py   # Versioned schema migrations
+│       │   │   ├── manager.py      # JobManager (queue, directory locking, cancellation)
+│       │   │   └── worker.py       # Domain execution dispatcher (Forge, Engineer, Optimization)
+│       │   └── routes/
+│       │       ├── __init__.py
+│       │       ├── health.py       # GET /health
+│       │       ├── models.py       # GET /api/v1/models/{model_id:path}
+│       │       ├── forge.py        # POST /api/v1/forge/plan
+│       │       └── jobs.py         # POST/GET /api/v1/jobs, SSE /events, /result, /cancel
 │       └── artifacts/
 │           ├── __init__.py
 │           ├── builder.py          # Artifact packaging & manifest generator
@@ -624,7 +675,8 @@ RocmHub/
     │   ├── test_guard.py
     │   ├── test_forge.py
     │   ├── test_engineer.py
-    │   └── test_optimization.py
+    │   ├── test_optimization.py
+    │   └── test_api.py
     └── integration/
         └── test_integration_hf.py  # End-to-end live Hugging Face Hub integration tests
 ```
@@ -637,12 +689,13 @@ RocmHub/
 2. **Model Forge Foundation**: *(Completed in Phase 10)* Deterministic build planning, model materialization, and recipe configuration.
 3. **Autonomous AI Engineer MVP**: *(Completed in Phase 11)* Autonomous preparation of open models on AMD GPUs with bounded execution loop, security boundary, and deterministic fallback.
 4. **Optimization Engine**: *(Completed in Phase 12)* Automated candidate generation, compilation, execution, and objective comparison against immutable baselines.
-5. **Verified Badge / Gate**: *(Phase 13)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
-6. **Alternative Runtimes**:
+5. **Backend API & Job Orchestration**: *(Completed in Phase 13)* Local FastAPI backend, asynchronous job manager with SQLite persistence, SSE streaming, and directory locking.
+6. **Verified Badge / Gate**: *(Phase 14)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
+7. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.
    - `SGLangRunner`: Fast RadixAttention runner.
    - `LlamaCppHipRunner`: Minimal C++ GGUF inference via hipBLAS.
-7. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
-8. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
-9. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
+8. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
+9. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
+10. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
 

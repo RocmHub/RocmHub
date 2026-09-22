@@ -624,6 +624,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output OptimizationReport as pure JSON on stdout.",
     )
 
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start local ROCmHub backend HTTP server (FastAPI & Job Orchestrator).",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host address to bind server (default: '127.0.0.1').",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port number to bind server (default: 8000).",
+    )
+    serve_parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Path to SQLite database file.",
+    )
+
     return parser
 
 
@@ -1752,6 +1773,26 @@ def main(args: Optional[List[str]] = None) -> int:
             return 1
         except Exception as exc:
             sys.stderr.write(f"Unexpected error in Optimization Engine: {exc}\n")
+            return 1
+
+    elif parsed_args.command == "serve":
+        try:
+            import uvicorn
+
+            from rocmhub.server import ServerConfig, create_app
+
+            config = ServerConfig(
+                host=parsed_args.host,
+                port=parsed_args.port,
+            )
+            if parsed_args.db_path:
+                config.db_path = Path(parsed_args.db_path).resolve()
+
+            app = create_app(config)
+            uvicorn.run(app, host=parsed_args.host, port=parsed_args.port)
+            return 0
+        except Exception as exc:
+            sys.stderr.write(f"Server error: {exc}\n")
             return 1
 
     return 0

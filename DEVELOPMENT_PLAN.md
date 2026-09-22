@@ -399,10 +399,28 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Code hygiene: `ruff check` and `mypy` clean (82 source files).
   - Live Demo Smoke Test: `scripts/live_demo_smoke.py` end-to-end 10-step automated verification on `Qwen/Qwen2.5-0.5B-Instruct` passed completely.
 
-### Phase 15: Verified Gate & Registry Preparation (PLANNED)
-- [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
-- [ ] Local and remote registry packaging.
-- **Verification**: End-to-end certification workflow test.
+### Phase 15: Product Acceptance & Polish (COMPLETED)
+- [x] Full real-browser end-to-end acceptance testing in Google Chrome across Desktop (1280x860) and Mobile (375x812) viewports.
+- [x] Full user scenario verification on `Qwen/Qwen2.5-0.5B-Instruct` across Model Explorer, Forge Studio, AI Engineer, Optimization Lab, and Dashboard.
+- [x] Immediate terminal event dispatch and SSE stream lifecycle stabilization.
+- [x] Truthful domain status presentation (`CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `NOT_MEASURED`) without synthetic numbers on non-AMD hosts.
+- [x] Responsive mobile navigation drawer and cross-studio deep linking.
+- [x] 7 verified screenshots captured and archived.
+- **Verification**: `scripts/browser_e2e.js` 100% pass, 347 Python unit tests pass, 12 Vitest tests pass.
+
+### Phase 16: CI, Licensing & Repository Hygiene (COMPLETED)
+- [x] Standard Apache License 2.0 (`LICENSE`) added in accordance with `pyproject.toml` and `README.md`.
+- [x] Multi-version GitHub Actions CI pipeline (`.github/workflows/ci.yml`) covering Python 3.9-3.12 (Ruff, Mypy, Pytest) and Node.js 20 (Vitest, Vite Build).
+- [x] Documentation alignment and removal of unverified/false claims across `README.md`, `DEVELOPMENT_PLAN.md`, and `ARCHITECTURE.md`.
+- **Verification**: Full test suite pass across backend and frontend, clean linting and typing.
+
+### Phase 17: AMD Execution Readiness (IN PROGRESS)
+- [ ] Direct launcher execution validation for materialized models on AMD ROCm hardware (`run_inference.py`).
+- [ ] Safe subprocess execution harness with stdout/stderr capture, timeout bounds, and exit code validation.
+- [ ] Bridge ForgeExecutor `execute_inference` to real launcher execution when ROCm GPU is available.
+- [ ] Truthful execution status transition: `PREPARED` -> `EXECUTED` upon verified model generation with `amd_validated=True`.
+- [ ] Comprehensive unit and integration test coverage for execution readiness.
+- **Verification**: Tests validating both fallback (non-AMD host cleanly skips with `PREPARED`) and simulated/live AMD execution (`EXECUTED`).
 
 ---
 

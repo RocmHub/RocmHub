@@ -6,15 +6,16 @@ ROCmHub is an open-source platform designed to automate the preparation, optimiz
 
 ---
 
-## Current Status: Phase 15 (Product Acceptance & Polish Complete)
+## Current Status: Phase 16 (CI, Licensing & Repository Hygiene Complete)
 
-ROCmHub features a complete platform stack validated by real Google Chrome E2E browser acceptance testing:
+ROCmHub features a complete platform stack validated by real Google Chrome E2E browser testing and multi-version CI:
 - **Core Domain Engine**: Model acquisition, static inspection, hardware detection, Benchmark Guard, and reproducible artifact builder.
 - **Model Forge**: Automated preparation and reproducible recipe generation for open causal language models (`pytorch_transformers_hip`).
 - **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery with structured trajectory and executive reports.
 - **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines (truthful `NOT_MEASURED` semantics on non-ROCm hosts).
 - **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, cooperative cancellation, and crash recovery.
 - **Frontend Workspace**: Responsive React 18 / TypeScript / Vite / Tailwind CSS web application featuring mobile navigation drawer, real-time SSE log streaming, live hardware telemetry, deep linking, model explorer, forge studio, AI engineer workspace, and optimization lab.
+- **Licensing & CI**: Standard Apache-2.0 license, full GitHub Actions CI pipeline covering Python 3.9–3.12 (linting, type checking, pytest) and Node 20 (Vitest, Vite production build).
 
 For architectural decisions, principles, and roadmap, see:
 - [ARCHITECTURE.md](ARCHITECTURE.md)

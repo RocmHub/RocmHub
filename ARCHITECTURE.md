@@ -67,6 +67,7 @@ rocmhub/
 ├── guard/         # Independent Benchmark Guard, stability checks, and reproducibility gate
 ├── forge/         # Model Forge: automated model preparation and build execution
 ├── engineer/      # Autonomous AI Engineer: observe-plan-act loop & safe tools
+├── optimization/  # Optimization Engine: variant planning, candidate builds & comparison
 └── cli/           # Developer command-line interface
 ```
 
@@ -218,6 +219,28 @@ rocmhub/
   - Fail-closed secret scrubber redacting tokens and credentials from persisted logs.
 - **CLI Commands**:
   - `rocmhub engineer <model_id> [--revision] [--target-gpu] [--objective] [--max-attempts] [--max-minutes] [--max-disk-gb] [--allow-full-weights] [--output-dir] [--json]`
+
+### 3.10 `rocmhub.optimization`
+- **Mission**: *Automated generation, building, execution, and objective comparison of model optimization candidates on AMD GPUs.*
+- **Decoupled Architecture**: Leverages Model Forge for build generation and Runners for execution, without duplicating logic.
+- **`BaselineManager`**:
+  - Establishes immutable, reproducible reference baseline (`OptimizationBaseline`) with fixed model ID, 40-char SHA, hardware, precision, and runtime.
+  - On non-AMD environments (macOS/CPU), baseline status is strictly `CONFIG_ONLY` or `PREPARED`, with performance metrics `NOT_MEASURED` (zero fake GPU metrics).
+- **`OptimizationRecipe` Protocol**:
+  - Concrete strategies: `BF16OptimizationRecipe`, `FP16OptimizationRecipe`, `FP32OptimizationRecipe`, `TorchCompileRecipe`.
+  - Strictest quantization safety: `QuantizationRecipe` (INT8/FP8) checks for explicit backend libraries (`bitsandbytes`, `autoawq`, AMD FP8 kernels on CDNA3 gfx942). If absent, explicitly flags `is_supported = False` with `UNSUPPORTED` reason.
+- **`OptimizationCandidate` & Candidate Lifecycle**:
+  - Deterministic ID: `cand-<sha256[:16]>`.
+  - Statuses: `PLANNED`, `CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `FAILED`, `UNSUPPORTED`.
+- **`ComparisonEngine`**:
+  - Strict comparability: asserts exact match on model ID, Git commit SHA, and hardware target.
+  - Truthful metrics: speedup is computed ONLY when real baseline and candidate benchmark results exist; otherwise returns `ComparisonVerdict.NOT_MEASURED`.
+  - Quality retention: evaluates Quality Retention Rate (`qrr_percent`). If quality degrades below threshold (e.g. 95%), candidate is marked `REGRESSED`.
+  - Statistical significance: requires >3% delta to declare `IMPROVED` or `REGRESSED`; otherwise `NO_CHANGE`.
+- **`OptimizationExecutor`**:
+  - Pipeline: Baseline -> Candidate Plans -> Candidate Builds -> Hardware Check -> Candidate Inferences/Benchmarks -> Comparison -> Report.
+- **CLI Command**:
+  - `rocmhub optimize <model_id> [--revision] [--target-gpu] [--objective] [--max-candidates] [--max-minutes] [--allow-full-weights] [--output-dir] [--json]`
 
 ---
 
@@ -579,6 +602,14 @@ RocmHub/
 │       │   ├── policy.py           # Budget guard, loop detector, failure classifier
 │       │   ├── memory.py           # Local trajectory store & secret scrubber
 │       │   └── reports.py          # Terminal reporting formatters
+│       ├── optimization/
+│       │   ├── __init__.py
+│       │   ├── base.py             # Optimization request, plan, candidate, baseline, comparison schemas
+│       │   ├── recipes.py          # OptimizationRecipe protocol, BF16, FP16, FP32, TorchCompile, Quantization
+│       │   ├── baseline.py         # Immutable baseline manager & non-AMD safety
+│       │   ├── comparison.py       # ComparisonEngine (speedup, QRR, statistical significance)
+│       │   ├── executor.py         # OptimizationExecutor orchestrating baseline & candidate matrix
+│       │   └── reports.py          # Terminal table formatting
 │       └── artifacts/
 │           ├── __init__.py
 │           ├── builder.py          # Artifact packaging & manifest generator
@@ -588,9 +619,12 @@ RocmHub/
     │   ├── test_models.py
     │   ├── test_hardware.py
     │   ├── test_benchmarks.py
+    │   ├── test_validation.py
     │   ├── test_artifacts.py
+    │   ├── test_guard.py
     │   ├── test_forge.py
-    │   └── test_engineer.py
+    │   ├── test_engineer.py
+    │   └── test_optimization.py
     └── integration/
         └── test_integration_hf.py  # End-to-end live Hugging Face Hub integration tests
 ```
@@ -602,11 +636,13 @@ RocmHub/
 1. **Benchmark Guard & Reproducibility Gate**: *(Completed in Phase 9)* Independent arbiter auditing measurement stability, environment drift, hardware health, and summary truthfulness.
 2. **Model Forge Foundation**: *(Completed in Phase 10)* Deterministic build planning, model materialization, and recipe configuration.
 3. **Autonomous AI Engineer MVP**: *(Completed in Phase 11)* Autonomous preparation of open models on AMD GPUs with bounded execution loop, security boundary, and deterministic fallback.
-4. **Verified Badge / Gate**: *(Phase 12)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
-5. **Alternative Runtimes**:
+4. **Optimization Engine**: *(Completed in Phase 12)* Automated candidate generation, compilation, execution, and objective comparison against immutable baselines.
+5. **Verified Badge / Gate**: *(Phase 13)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
+6. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.
    - `SGLangRunner`: Fast RadixAttention runner.
    - `LlamaCppHipRunner`: Minimal C++ GGUF inference via hipBLAS.
-6. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
-7. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
-8. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
+7. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
+8. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
+9. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
+

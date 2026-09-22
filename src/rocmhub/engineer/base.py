@@ -33,6 +33,7 @@ class EngineerStatus(str, Enum):
     """Terminal lifecycle status of an AI Engineer session."""
 
     SUCCESS = "SUCCESS"
+    CONFIG_ONLY = "CONFIG_ONLY"
     STOPPED_ENVIRONMENT = "STOPPED_ENVIRONMENT"
     BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
     FAILED = "FAILED"

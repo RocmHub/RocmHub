@@ -309,7 +309,41 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - `rocmhub engineer <model_id> [--revision] [--target-gpu] [--objective] [--max-attempts] [--max-minutes] [--max-disk-gb] [--allow-full-weights] [--output-dir] [--json]`
 - **Verification**: 306 unit tests (24 new Phase 11 tests) + 9 live integration tests passing. Ruff clean. Mypy clean. Real CLI execution on macOS verified.
 
-### Phase 12: Verified Gate & Registry Preparation
+### Phase 12: Optimization Engine (COMPLETED)
+**Objective: Systematic candidate generation, building, execution, and objective comparison against immutable baselines on AMD GPUs.**
+- [x] Harden success semantics across AI Engineer and Forge:
+  - Added `EngineerStatus.CONFIG_ONLY` to prevent conflating configuration preparation with full inference execution or verified optimization.
+- [x] Implement domain exceptions in `src/rocmhub/core/errors.py`:
+  - `OptimizationError`, `UnsupportedStrategyError`, `BaselineExecutionError`, `CandidateBuildError`, `IncomparableResultsError`, `QualityRegressionError`.
+- [x] Implement `src/rocmhub/optimization/base.py`:
+  - `OptimizationStrategy`: `BF16`, `FP16`, `FP32`, `TORCH_COMPILE`, `QUANT_INT8`, `QUANT_FP8`, `CUSTOM`.
+  - `CandidateStatus`: `PLANNED`, `CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `FAILED`, `UNSUPPORTED`.
+  - `ComparisonVerdict`: `IMPROVED`, `REGRESSED`, `NO_CHANGE`, `NOT_MEASURED`, `INCOMPARABLE`.
+  - Data contracts: `OptimizationCandidate`, `OptimizationBaseline`, `ComparisonResult`, `OptimizationRequest`, `OptimizationPlan`, `OptimizationReport`.
+- [x] Implement `src/rocmhub/optimization/recipes.py`:
+  - `OptimizationRecipe` protocol: `strategy`, `name`, `description`, `is_supported(hardware, env) -> (bool, reason)`, `apply(forge_recipe, model_spec) -> forge_recipe`.
+  - Concrete strategies: `BF16OptimizationRecipe`, `FP16OptimizationRecipe`, `FP32OptimizationRecipe`, `TorchCompileRecipe`.
+  - Strict quantization safety: `QuantizationRecipe` (INT8/FP8) checks for explicit backend libraries (`bitsandbytes`, `autoawq`, AMD FP8 kernels on CDNA3 gfx942). If absent, explicitly flags `is_supported = False` with `UNSUPPORTED` reason. Zero fake quantization.
+- [x] Implement `src/rocmhub/optimization/baseline.py`:
+  - `BaselineManager`: establishes immutable, reproducible reference baseline with fixed model ID, 40-char SHA, hardware, precision, and runtime.
+  - Non-AMD behavior: marks baseline as `CONFIG_ONLY` or `PREPARED`, with performance metrics `NOT_MEASURED` (zero fake GPU metrics).
+- [x] Implement `src/rocmhub/optimization/comparison.py`:
+  - `ComparisonEngine`: strict comparability assertions (matching model ID, commit SHA, hardware target).
+  - Truthful speedup calculations: speedup is computed ONLY when real baseline and candidate benchmark results exist; otherwise returns `ComparisonVerdict.NOT_MEASURED`.
+  - Quality retention: evaluates Quality Retention Rate (`qrr_percent`). If quality degrades below threshold (e.g. 95%), candidate is marked `REGRESSED`.
+  - Statistical significance: requires >3% delta to declare `IMPROVED` or `REGRESSED`; otherwise `NO_CHANGE`.
+- [x] Implement `src/rocmhub/optimization/executor.py`:
+  - `OptimizationExecutor`: orchestrates baseline establishment, candidate planning, Forge building, AMD GPU check (stops safely before GPU execution on non-AMD environments), comparative evaluation, and reporting.
+- [x] Implement `src/rocmhub/optimization/reports.py`:
+  - `format_optimization_report_table()`: Rich terminal comparison matrix.
+- [x] AI Engineer integration in `src/rocmhub/engineer/tools.py`:
+  - Added 6 safe tools to `ToolRegistry`: `create_optimization_plan`, `build_candidate`, `execute_candidate`, `benchmark_candidate`, `compare_candidates`, `read_optimization_errors`.
+  - Enforced path traversal validation (`validate_safe_path`) and forbidden prefixes across all optimization tools.
+- [x] Implement CLI command:
+  - `rocmhub optimize <model_id> [--revision] [--target-gpu] [--objective] [--max-candidates] [--max-minutes] [--allow-full-weights] [--output-dir] [--json]`
+- **Verification**: 327 unit tests (21 new Phase 12 tests) + 10 live integration tests passing. Ruff clean. Mypy clean. Live CLI execution on macOS verified (exits 0 with status `CONFIG_ONLY`, `NOT_MEASURED`, zero synthetic metrics).
+
+### Phase 13: Verified Gate & Registry Preparation (PLANNED)
 - [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
 - [ ] Local and remote registry packaging.
 - **Verification**: End-to-end certification workflow test.

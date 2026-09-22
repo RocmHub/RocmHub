@@ -308,3 +308,39 @@ class InvalidToolCallError(EngineerError):
 
     error_code = "INVALID_TOOL_CALL"
 
+
+class OptimizationError(ROCmHubError):
+    """Base exception for all optimization engine operations."""
+
+    error_code = "OPTIMIZATION_ERROR"
+
+
+class UnsupportedStrategyError(OptimizationError):
+    """Raised when an optimization strategy or recipe is unsupported on current hardware or model."""
+
+    error_code = "UNSUPPORTED_OPTIMIZATION_STRATEGY"
+
+
+class BaselineExecutionError(OptimizationError):
+    """Raised when obtaining baseline execution or benchmark evidence fails."""
+
+    error_code = "BASELINE_EXECUTION_ERROR"
+
+
+class CandidateBuildError(OptimizationError):
+    """Raised when compiling or materializing an optimization candidate fails."""
+
+    error_code = "CANDIDATE_BUILD_ERROR"
+
+
+class IncomparableResultsError(OptimizationError):
+    """Raised when attempting to compare baseline and candidate under unequal conditions."""
+
+    error_code = "INCOMPARABLE_RESULTS_ERROR"
+
+
+class QualityRegressionError(OptimizationError):
+    """Raised when candidate output quality drops below the acceptable threshold."""
+
+    error_code = "QUALITY_REGRESSION_ERROR"
+

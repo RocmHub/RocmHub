@@ -74,6 +74,20 @@ from rocmhub.guard import (
     ABBASequence,
     BenchmarkGuard,
 )
+from rocmhub.optimization import (
+    CandidateStatus,
+    ComparisonEngine,
+    ComparisonResult,
+    ComparisonVerdict,
+    OptimizationBaseline,
+    OptimizationCandidate,
+    OptimizationExecutor,
+    OptimizationPlan,
+    OptimizationRecipe,
+    OptimizationReport,
+    OptimizationRequest,
+    OptimizationStrategy,
+)
 from rocmhub.runners import BaseRunner, HuggingFaceRunner
 from rocmhub.validation import ValidationConfig, ValidationEvaluator
 
@@ -145,4 +159,16 @@ __all__ = [
     "EngineerBudget",
     "EngineerRequest",
     "EngineerReport",
+    "CandidateStatus",
+    "ComparisonResult",
+    "ComparisonVerdict",
+    "OptimizationBaseline",
+    "OptimizationCandidate",
+    "OptimizationPlan",
+    "OptimizationReport",
+    "OptimizationRequest",
+    "OptimizationStrategy",
+    "ComparisonEngine",
+    "OptimizationExecutor",
+    "OptimizationRecipe",
 ]

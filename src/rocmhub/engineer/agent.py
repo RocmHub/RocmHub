@@ -32,6 +32,7 @@ from rocmhub.engineer.policy import (
 )
 from rocmhub.engineer.provider import AutonomousRulesProvider, LLMProvider
 from rocmhub.engineer.tools import ToolRegistry
+from rocmhub.forge.base import BuildStatus
 from rocmhub.forge.manifest import BuildManifest
 
 
@@ -279,6 +280,18 @@ class AIEngineer:
                 status = EngineerStatus.STOPPED_ENVIRONMENT
                 reasons.append(
                     "Model prepared and built, but real AMD execution skipped because no AMD GPU is present on host."
+                )
+        elif status == EngineerStatus.SUCCESS:
+            # Enforce success semantics: if only config was prepared without full weights, status is CONFIG_ONLY
+            if final_manifest and final_manifest.status == BuildStatus.CONFIG_ONLY:
+                status = EngineerStatus.CONFIG_ONLY
+                reasons.append(
+                    "Model configuration prepared in CONFIG_ONLY mode (weights not materialized). Real AMD execution was not performed."
+                )
+            elif not request.budget.allow_full_weights and (not final_manifest or not final_manifest.weights_path):
+                status = EngineerStatus.CONFIG_ONLY
+                reasons.append(
+                    "Model configuration prepared in CONFIG_ONLY mode. Full weights not downloaded."
                 )
 
         total_duration = round(time.monotonic() - start_mono, 4)

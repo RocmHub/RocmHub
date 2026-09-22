@@ -46,6 +46,11 @@ from rocmhub.guard import BenchmarkGuard
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
+from rocmhub.optimization import (
+    OptimizationExecutor,
+    OptimizationRequest,
+    format_optimization_report_table,
+)
 from rocmhub.runners import HuggingFaceRunner
 from rocmhub.validation import DEFAULT_VALIDATION_CASES, ValidationConfig, ValidationEvaluator
 
@@ -557,6 +562,66 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output EngineerReport as pure JSON on stdout.",
+    )
+
+    optimize_parser = subparsers.add_parser(
+        "optimize",
+        help="Generate, build, benchmark, and compare optimization candidate strategies on AMD ROCm.",
+    )
+    optimize_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Hugging Face model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    optimize_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    optimize_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    optimize_parser.add_argument(
+        "--target-gpu",
+        default=None,
+        help="Target AMD GPU architecture (e.g. gfx90a, gfx1100).",
+    )
+    optimize_parser.add_argument(
+        "--objective",
+        default="MAX_THROUGHPUT",
+        choices=["MAX_THROUGHPUT", "MIN_LATENCY", "BALANCED"],
+        help="Optimization objective (default: 'MAX_THROUGHPUT').",
+    )
+    optimize_parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=3,
+        help="Maximum candidate strategies to plan and evaluate (default: 3).",
+    )
+    optimize_parser.add_argument(
+        "--max-minutes",
+        type=float,
+        default=10.0,
+        help="Maximum optimization session runtime in minutes (default: 10.0).",
+    )
+    optimize_parser.add_argument(
+        "--allow-full-weights",
+        action="store_true",
+        help="Explicitly permit downloading full model weight tensors (default: False).",
+    )
+    optimize_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Custom output directory for candidate builds and report.",
+    )
+    optimize_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output OptimizationReport as pure JSON on stdout.",
     )
 
     return parser
@@ -1634,7 +1699,11 @@ def main(args: Optional[List[str]] = None) -> int:
             else:
                 sys.stdout.write(format_engineer_report_table(engineer_report) + "\n")
 
-            if engineer_report.status in (EngineerStatus.SUCCESS, EngineerStatus.STOPPED_ENVIRONMENT):
+            if engineer_report.status in (
+                EngineerStatus.SUCCESS,
+                EngineerStatus.STOPPED_ENVIRONMENT,
+                EngineerStatus.CONFIG_ONLY,
+            ):
                 return 0
             elif engineer_report.status == EngineerStatus.BUDGET_EXCEEDED:
                 return 2
@@ -1645,6 +1714,44 @@ def main(args: Optional[List[str]] = None) -> int:
             return 1
         except Exception as exc:
             sys.stderr.write(f"Unexpected error in AI Engineer: {exc}\n")
+            return 1
+
+    elif parsed_args.command == "optimize":
+        model_id = parsed_args.model_id or parsed_args.model_opt
+        if not model_id:
+            sys.stderr.write("Error: Model ID must be specified either as positional argument or via --model.\n")
+            return 1
+
+        try:
+            opt_request = OptimizationRequest(
+                model_id=model_id,
+                revision=parsed_args.revision,
+                target_gpu=parsed_args.target_gpu,
+                objective=parsed_args.objective,
+                max_candidates=parsed_args.max_candidates,
+                max_execution_time_seconds=parsed_args.max_minutes * 60.0,
+                allow_full_weights=parsed_args.allow_full_weights,
+                output_dir=parsed_args.output_dir,
+            )
+            opt_executor = OptimizationExecutor()
+            opt_report = opt_executor.execute(opt_request)
+
+            if parsed_args.json:
+                sys.stdout.write(opt_report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(format_optimization_report_table(opt_report) + "\n")
+
+            if opt_report.status in ("SUCCESS", "CONFIG_ONLY", "STOPPED_ENVIRONMENT"):
+                return 0
+            elif opt_report.status == "BUDGET_EXCEEDED":
+                return 2
+            else:
+                return 1
+        except ROCmHubError as exc:
+            sys.stderr.write(f"Optimization error: {exc}\n")
+            return 1
+        except Exception as exc:
+            sys.stderr.write(f"Unexpected error in Optimization Engine: {exc}\n")
             return 1
 
     return 0

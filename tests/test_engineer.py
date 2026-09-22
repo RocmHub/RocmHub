@@ -393,7 +393,7 @@ class TestAIEngineerAgent:
 
         report = agent.run(request)
 
-        assert report.status == EngineerStatus.SUCCESS
+        assert report.status == EngineerStatus.CONFIG_ONLY
         assert report.model_id == sample_qwen_spec.model_id
         assert report.revision == SAMPLE_COMMIT_SHA
         assert len(report.trajectory) >= 5
@@ -566,5 +566,5 @@ class TestEngineerCLI:
             captured = capsys.readouterr()
             data = json.loads(captured.out)
             assert data["model_id"] == "Qwen/Qwen2.5-0.5B-Instruct"
-            assert data["status"] == "SUCCESS"
+            assert data["status"] == "CONFIG_ONLY"
             assert len(data["trajectory"]) > 0

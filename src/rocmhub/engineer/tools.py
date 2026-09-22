@@ -6,6 +6,7 @@ No shell access, no arbitrary code execution, and no unvalidated file operations
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tempfile
@@ -24,6 +25,8 @@ from rocmhub.forge.planner import ForgePlanner
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
+from rocmhub.optimization.base import OptimizationStrategy
+from rocmhub.optimization.recipes import get_recipe_for_strategy
 from rocmhub.runners.hf_runner import HuggingFaceRunner
 
 ALLOWED_TOOLS: Set[str] = {
@@ -37,6 +40,13 @@ ALLOWED_TOOLS: Set[str] = {
     "run_benchmark",
     "read_build_errors",
     "save_engineer_report",
+    # Phase 12 Optimization Tools
+    "create_optimization_plan",
+    "build_candidate",
+    "execute_candidate",
+    "benchmark_candidate",
+    "compare_candidates",
+    "read_optimization_errors",
 }
 
 FORBIDDEN_PREFIXES = (
@@ -296,3 +306,133 @@ class ToolRegistry:
     def _tool_save_engineer_report(self, args: Dict[str, Any]) -> Dict[str, Any]:
         summary = args.get("summary", "Session concluded.")
         return {"status": "SUCCESS", "summary": summary}
+
+    def _tool_create_optimization_plan(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        model_id = args.get("model_id")
+        if not model_id:
+            raise InvalidToolCallError("create_optimization_plan requires 'model_id'.")
+        revision = args.get("revision") or "main"
+        target_gpu = args.get("target_gpu")
+        strategies_raw = args.get("strategies", ["bf16", "fp16", "fp32"])
+
+        spec = self._inspector.inspect(model_id=model_id, revision=revision)
+        report = self._observer.observe()
+        hardware_spec = report.gpus[0] if report.gpus else None
+
+        planned_candidates = []
+        for s_str in strategies_raw:
+            try:
+                strat = OptimizationStrategy(s_str)
+                recipe = get_recipe_for_strategy(strat)
+                is_supp, reason = recipe.is_supported(spec, hardware_spec)
+                planned_candidates.append({
+                    "strategy": strat.value,
+                    "precision": recipe.precision,
+                    "supported": is_supp,
+                    "reason": reason,
+                    "runtime_flags": recipe.runtime_flags,
+                })
+            except Exception as exc:
+                planned_candidates.append({
+                    "strategy": s_str,
+                    "supported": False,
+                    "reason": str(exc),
+                })
+
+        plan_id = f"opt_plan_{hashlib.sha256(f'{model_id}:{spec.commit_sha}:{target_gpu}'.encode()).hexdigest()[:16]}"
+        return {
+            "status": "SUCCESS",
+            "plan_id": plan_id,
+            "model_id": model_id,
+            "revision": spec.commit_sha,
+            "candidates": planned_candidates,
+        }
+
+    def _tool_build_candidate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        model_id = args.get("model_id")
+        if not model_id:
+            raise InvalidToolCallError("build_candidate requires 'model_id'.")
+        revision = args.get("revision")
+        precision = args.get("precision", "fp16")
+        target_gpu = args.get("target_gpu")
+        output_dir_str = args.get("output_dir")
+        if not output_dir_str:
+            raise InvalidToolCallError("build_candidate requires 'output_dir'.")
+
+        out_dir = validate_safe_path(output_dir_str, self._allowed_dirs)
+        allow_full_weights = bool(args.get("allow_full_weights", False))
+        force = bool(args.get("force", False))
+
+        plan = self._planner.create_plan(
+            model_id=model_id,
+            revision=revision,
+            target_gpu=target_gpu,
+            precision=precision,
+            output_dir=out_dir,
+        )
+        manifest = self._executor.execute(
+            plan=plan,
+            download_weights=allow_full_weights,
+            force=force,
+            execute_inference=False,
+        )
+        return {
+            "status": "SUCCESS",
+            "candidate_id": f"cand-{hashlib.sha256(str(out_dir).encode()).hexdigest()[:16]}",
+            "build_status": manifest.status.value,
+            "manifest": manifest.model_dump(),
+        }
+
+    def _tool_execute_candidate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        report = self._observer.observe()
+        has_amd = any(gpu.gpu_vendor and gpu.gpu_vendor.lower() == "amd" for gpu in report.gpus)
+        if not has_amd:
+            return {
+                "status": "SKIPPED",
+                "message": "Host is macOS or non-AMD. Candidate execution safely skipped with zero synthetic metrics.",
+            }
+
+        build_dir_str = args.get("build_dir")
+        if not build_dir_str:
+            raise InvalidToolCallError("execute_candidate requires 'build_dir'.")
+        _ = validate_safe_path(build_dir_str, self._allowed_dirs)
+        _ = args.get("prompt", "Hello AMD candidate!")
+        _ = int(args.get("max_new_tokens", 16))
+
+        return {
+            "status": "NOT_MEASURED",
+            "message": "Candidate execution harness ready on AMD GPU.",
+        }
+
+    def _tool_benchmark_candidate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        report = self._observer.observe()
+        has_amd = any(gpu.gpu_vendor and gpu.gpu_vendor.lower() == "amd" for gpu in report.gpus)
+        if not has_amd:
+            return {
+                "status": "NOT_MEASURED",
+                "message": "Host is macOS or non-AMD. Candidate benchmark safely skipped with zero synthetic metrics.",
+            }
+
+        return {
+            "status": "NOT_MEASURED",
+            "message": "Candidate benchmark harness ready on AMD GPU.",
+        }
+
+    def _tool_compare_candidates(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        report = self._observer.observe()
+        has_amd = any(gpu.gpu_vendor and gpu.gpu_vendor.lower() == "amd" for gpu in report.gpus)
+        if not has_amd:
+            return {
+                "status": "SUCCESS",
+                "verdict": "NOT_MEASURED",
+                "reasons": ["Benchmark measurements not available on non-AMD host. Zero synthetic speedups generated."],
+            }
+
+        return {
+            "status": "SUCCESS",
+            "verdict": "NOT_MEASURED",
+            "reasons": ["Comparative benchmark requires execution on AMD GPU with full weights."],
+        }
+
+    def _tool_read_optimization_errors(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return self._tool_read_build_errors(args)

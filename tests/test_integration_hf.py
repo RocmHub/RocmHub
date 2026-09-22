@@ -334,7 +334,7 @@ def test_live_engineer_qwen_model_on_current_mac(
     captured = capsys.readouterr()
     report_dict = json.loads(captured.out)
 
-    assert report_dict["status"] == "SUCCESS"
+    assert report_dict["status"] == "CONFIG_ONLY"
     assert report_dict["model_id"] == model_id
     assert len(report_dict["revision"]) == 40
     assert all(c in "0123456789abcdef" for c in report_dict["revision"])
@@ -350,5 +350,45 @@ def test_live_engineer_qwen_model_on_current_mac(
     assert (build_dir / "build_manifest.json").exists()
     assert (build_dir / "runtime_config.json").exists()
     assert (build_dir / "run_inference.py").exists()
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_optimize_qwen_model_on_current_mac(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Live integration test: rocmhub optimize run on Mac for Qwen2.5-0.5B.
+
+    Verifies:
+    - Real Hugging Face Hub metadata is fetched (40-char commit SHA resolved).
+    - Real SystemObserver detects Mac host.
+    - Baseline and candidate plans are created.
+    - Candidates built with CONFIG_ONLY status.
+    - AMD GPU execution not performed.
+    - Comparative measurements report NOT_MEASURED.
+    - Zero fake speedup metrics.
+    """
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    opt_dir = tmp_path / "live_optimize_run"
+
+    exit_code = main([
+        "optimize", model_id,
+        "--output-dir", str(opt_dir),
+        "--max-candidates", "2",
+        "--json",
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    report_dict = json.loads(captured.out)
+
+    assert report_dict["model_id"] == model_id
+    assert len(report_dict["revision"]) == 40
+    assert report_dict["status"] == "CONFIG_ONLY"
+    assert len(report_dict["candidates"]) == 2
+    assert all(c["status"] == "CONFIG_ONLY" for c in report_dict["candidates"])
+    assert len(report_dict["comparisons"]) == 2
+    assert all(comp["verdict"] == "NOT_MEASURED" for comp in report_dict["comparisons"])
+    assert report_dict["best_candidate_id"] is None
 
 

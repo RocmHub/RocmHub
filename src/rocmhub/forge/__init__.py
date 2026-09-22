@@ -10,7 +10,7 @@ from rocmhub.forge.base import (
     MaterializedModel,
     StepStatus,
 )
-from rocmhub.forge.executor import ForgeExecutor
+from rocmhub.forge.executor import ExecutionResult, ForgeExecutor
 from rocmhub.forge.manifest import (
     BuildManifest,
     assert_no_secrets,
@@ -46,4 +46,5 @@ __all__ = [
     "assert_no_secrets",
     "write_manifest",
     "ForgeExecutor",
+    "ExecutionResult",
 ]

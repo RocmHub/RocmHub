@@ -38,6 +38,7 @@ from rocmhub.engineer import (
 )
 from rocmhub.forge import (
     BuildManifest,
+    ExecutionResult,
     ForgeExecutor,
     ForgePlan,
     ForgePlanner,
@@ -495,6 +496,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output BuildManifest as pure JSON on stdout.",
+    )
+
+    # Action: forge execute
+    forge_exec_parser = forge_subparsers.add_parser(
+        "execute",
+        help="Execute standalone launcher (run_inference.py) in a build directory.",
+    )
+    forge_exec_parser.add_argument(
+        "build_dir",
+        help="Path to the build directory containing run_inference.py.",
+    )
+    forge_exec_parser.add_argument(
+        "--prompt",
+        default="Explain the significance of open-source AI acceleration in one sentence.",
+        help="Input text prompt for inference.",
+    )
+    forge_exec_parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=32,
+        help="Maximum new tokens to generate (default: 32).",
+    )
+    forge_exec_parser.add_argument(
+        "--device",
+        default="cuda",
+        help="Target device ('cuda' for AMD GPU / ROCm, 'cpu' for fallback testing).",
+    )
+    forge_exec_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Execution timeout in seconds (default: 120).",
+    )
+    forge_exec_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ExecutionResult as pure JSON on stdout.",
     )
 
     # Command: engineer
@@ -1056,6 +1094,32 @@ def _format_build_manifest(manifest: BuildManifest) -> str:
             digest_short = digest[:12] + "..." if len(digest) > 12 else digest
             lines.append(f"  - {fname:<24} (sha256: {digest_short})")
 
+    return "\n".join(lines)
+
+
+def _format_execution_result(result: ExecutionResult) -> str:
+    """Format ExecutionResult into clean human-readable output."""
+    lines = [
+        "=" * 60,
+        "ROCmHub — Forge Launcher Execution Result",
+        "=" * 60,
+        f"{'Execution Status:':<26} {result.status.value}",
+        f"{'AMD Hardware Validated:':<26} {'yes' if result.amd_validated else 'no'}",
+        f"{'Target Device:':<26} {result.device or 'unknown'}",
+        f"{'Duration:':<26} {result.duration_seconds:.3f}s",
+        f"{'Exit Code:':<26} {result.exit_code}",
+    ]
+    if result.tokens_generated is not None:
+        lines.append(f"{'Tokens Generated:':<26} {result.tokens_generated}")
+    if result.tokens_per_second is not None:
+        lines.append(f"{'Throughput:':<26} {result.tokens_per_second:.1f} tok/s")
+    if result.generated_text:
+        lines.append("-" * 60)
+        lines.append(f"Generated Output:\n{result.generated_text}")
+    if result.error_message:
+        lines.append("-" * 60)
+        lines.append(f"Notice / Error:\n{result.error_message}")
+    lines.append("=" * 60)
     return "\n".join(lines)
 
 
@@ -1633,7 +1697,29 @@ def main(args: Optional[List[str]] = None) -> int:
             build_parser().parse_args(["forge", "--help"])
             return 0
 
-        model_id = parsed_args.model_opt or parsed_args.model_id
+        if parsed_args.forge_action == "execute":
+            try:
+                executor = ForgeExecutor()
+                exec_res = executor.execute_build(
+                    build_dir=parsed_args.build_dir,
+                    prompt=parsed_args.prompt,
+                    max_new_tokens=parsed_args.max_new_tokens,
+                    device=parsed_args.device,
+                    timeout_seconds=parsed_args.timeout,
+                )
+                if parsed_args.json:
+                    sys.stdout.write(exec_res.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_execution_result(exec_res) + "\n")
+                return 0 if exec_res.status in (ExecutionStatus.SUCCESS, ExecutionStatus.SKIPPED) else 1
+            except ROCmHubError as exc:
+                sys.stderr.write(f"Forge execute error: {exc}\n")
+                return 1
+            except Exception as exc:
+                sys.stderr.write(f"Unexpected error during forge execute: {exc}\n")
+                return 1
+
+        model_id = getattr(parsed_args, "model_opt", None) or getattr(parsed_args, "model_id", None)
         if not model_id:
             sys.stderr.write("Error: Model ID must be specified either as positional argument or via --model.\n")
             return 1

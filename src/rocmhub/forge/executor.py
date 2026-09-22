@@ -5,16 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict
 
 from rocmhub.core.errors import (
     BuildConflictError,
     BuildExecutionError,
 )
-from rocmhub.core.types import ModelSpec
+from rocmhub.core.types import ExecutionStatus, ModelSpec
 from rocmhub.forge.base import (
     BuildStatus,
     BuildStepRecord,
@@ -28,6 +32,24 @@ from rocmhub.forge.recipes import get_recipe
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
+
+
+class ExecutionResult(BaseModel):
+    """Structured result of executing a standalone model launcher (run_inference.py)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: ExecutionStatus
+    amd_validated: bool
+    exit_code: int
+    duration_seconds: float
+    generated_text: Optional[str] = None
+    tokens_generated: Optional[int] = None
+    tokens_per_second: Optional[float] = None
+    device: Optional[str] = None
+    stdout: str = ""
+    stderr: str = ""
+    error_message: Optional[str] = None
 
 
 def _sha256_file(path: Path) -> str:
@@ -339,10 +361,44 @@ class ForgeExecutor:
                 overall_status = BuildStatus.PREPARED
                 amd_validated = False
             else:
-                # AMD GPU present: attempt real execution
-                # (Future phase or live AMD execution)
-                overall_status = BuildStatus.EXECUTED
-                amd_validated = True
+                # AMD GPU present: execute launcher on AMD hardware
+                t_exec = time.perf_counter()
+                exec_res = self.execute_build(
+                    build_dir=build_dir,
+                    prompt="Explain the significance of open-source AI acceleration in one sentence.",
+                    max_new_tokens=32,
+                    device="cuda",
+                )
+                dur = round(time.perf_counter() - t_exec, 4)
+                if exec_res.status == ExecutionStatus.SUCCESS:
+                    records.append(
+                        BuildStepRecord(
+                            name="execute_inference",
+                            status=StepStatus.SUCCESS,
+                            duration_seconds=dur,
+                            message=f"AMD ROCm inference verified ({exec_res.tokens_generated} tokens generated).",
+                            details={
+                                "generated_text": exec_res.generated_text,
+                                "tokens_generated": exec_res.tokens_generated,
+                                "tokens_per_second": exec_res.tokens_per_second,
+                                "device": exec_res.device,
+                            },
+                        )
+                    )
+                    overall_status = BuildStatus.EXECUTED
+                    amd_validated = True
+                else:
+                    records.append(
+                        BuildStepRecord(
+                            name="execute_inference",
+                            status=StepStatus.FAILED,
+                            duration_seconds=dur,
+                            message=f"Inference execution failed: {exec_res.error_message or exec_res.stderr}",
+                            details={"exit_code": exec_res.exit_code, "stderr": exec_res.stderr},
+                        )
+                    )
+                    overall_status = BuildStatus.FAILED
+                    amd_validated = False
 
         completed_at = datetime.now(timezone.utc).isoformat()
         manifest = BuildManifest(
@@ -406,3 +462,160 @@ class ForgeExecutor:
             f"Forge build failed at step '{failed_step}': {error_message}",
             details={"build_id": build_id, "failed_step": failed_step, "error": error_message},
         )
+
+    def execute_build(
+        self,
+        build_dir: Union[Path, str],
+        prompt: str = "Explain the significance of open-source AI acceleration in one sentence.",
+        max_new_tokens: int = 32,
+        device: str = "cuda",
+        timeout_seconds: int = 120,
+    ) -> ExecutionResult:
+        """Execute standalone launcher (run_inference.py) in build_dir and verify output.
+
+        Status semantics:
+        - If device='cuda' and no AMD GPU is detected: cleanly returns SKIPPED with amd_validated=False.
+        - If execution succeeds: returns SUCCESS with amd_validated=True (if run on AMD GPU) and token metrics.
+        - If execution crashes or times out: returns FAILED with error details.
+        """
+        bdir = Path(build_dir).resolve()
+        script_path = bdir / "run_inference.py"
+        if not script_path.exists():
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                amd_validated=False,
+                exit_code=1,
+                duration_seconds=0.0,
+                error_message=f"Launcher script not found at '{script_path}'.",
+            )
+
+        report = self._observer.observe()
+        has_amd_gpu = any(gpu.gpu_vendor and gpu.gpu_vendor.lower() == "amd" for gpu in report.gpus)
+
+        if device == "cuda" and not has_amd_gpu:
+            return ExecutionResult(
+                status=ExecutionStatus.SKIPPED,
+                amd_validated=False,
+                exit_code=0,
+                duration_seconds=0.0,
+                device="cpu",
+                stdout="Skipped execution: no AMD ROCm GPU detected on this host. Build is PREPARED.",
+                error_message="No AMD ROCm GPU detected on host.",
+            )
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--prompt",
+            prompt,
+            "--max-new-tokens",
+            str(max_new_tokens),
+            "--device",
+            device,
+            "--json",
+        ]
+
+        clean_env = os.environ.copy()
+        clean_env["PYTHONUNBUFFERED"] = "1"
+        clean_env["LC_ALL"] = "C"
+
+        t0 = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(bdir),
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                env=clean_env,
+            )
+            duration = round(time.perf_counter() - t0, 4)
+            stdout = proc.stdout.strip()
+            stderr = proc.stderr.strip()
+
+            parsed: Dict[str, Any] = {}
+            if stdout:
+                for line in reversed(stdout.splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        try:
+                            parsed = json.loads(line)
+                            break
+                        except Exception:
+                            continue
+
+            if proc.returncode == 0 and parsed.get("status") == "SUCCESS":
+                res = ExecutionResult(
+                    status=ExecutionStatus.SUCCESS,
+                    amd_validated=has_amd_gpu and (device == "cuda"),
+                    exit_code=0,
+                    duration_seconds=duration,
+                    generated_text=parsed.get("generated_text"),
+                    tokens_generated=parsed.get("tokens_generated"),
+                    tokens_per_second=parsed.get("tokens_per_second"),
+                    device=parsed.get("device") or device,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                if res.amd_validated:
+                    self._upgrade_manifest_to_executed(bdir, res)
+                return res
+            else:
+                err_msg = parsed.get("error") if parsed else (stderr or f"Process exited with code {proc.returncode}")
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    amd_validated=False,
+                    exit_code=proc.returncode,
+                    duration_seconds=duration,
+                    stdout=stdout,
+                    stderr=stderr,
+                    error_message=err_msg,
+                )
+
+        except subprocess.TimeoutExpired:
+            duration = round(time.perf_counter() - t0, 4)
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                amd_validated=False,
+                exit_code=-1,
+                duration_seconds=duration,
+                error_message=f"Execution timed out after {timeout_seconds} seconds.",
+            )
+        except Exception as exc:
+            duration = round(time.perf_counter() - t0, 4)
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                amd_validated=False,
+                exit_code=-1,
+                duration_seconds=duration,
+                error_message=str(exc),
+            )
+
+    def _upgrade_manifest_to_executed(self, build_dir: Path, result: ExecutionResult) -> None:
+        """Safely upgrade build manifest to EXECUTED status after successful AMD validation."""
+        manifest_path = build_dir / "build_manifest.json"
+        if not manifest_path.exists():
+            return
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["status"] = BuildStatus.EXECUTED.value
+            data["amd_validated"] = True
+            step_names = [s.get("name") for s in data.get("steps", [])]
+            if "execute_inference" not in step_names:
+                data.setdefault("steps", []).append({
+                    "name": "execute_inference",
+                    "status": StepStatus.SUCCESS.value,
+                    "duration_seconds": result.duration_seconds,
+                    "message": f"Verified execution on AMD GPU ({result.tokens_generated} tokens).",
+                    "details": {
+                        "tokens_generated": result.tokens_generated,
+                        "tokens_per_second": result.tokens_per_second,
+                        "device": result.device,
+                    },
+                })
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+

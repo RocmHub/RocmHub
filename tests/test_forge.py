@@ -864,3 +864,211 @@ class TestForgeCLI:
             assert "CONFIG_ONLY" in captured.out
             assert "AMD Validated:" in captured.out
             assert (build_dir / "build_manifest.json").exists()
+
+
+class TestForgeExecutionReadiness:
+    """Test suite for Phase 17: AMD Execution Readiness."""
+
+    def test_execute_inference_non_amd_skips(
+        self,
+        tmp_path: Path,
+        sample_qwen_spec: ModelSpec,
+        non_amd_detection_report: DetectionReport,
+    ) -> None:
+        """On non-AMD hosts, execute_inference=True cleanly skips and stays PREPARED."""
+        build_dir = tmp_path / "bld_non_amd"
+        plan = ForgePlan(
+            plan_id="plan_test_non_amd",
+            model_id="Qwen/Qwen2.5-0.5B-Instruct",
+            revision=SAMPLE_COMMIT_SHA,
+            precision="fp16",
+            recipe_id="pytorch_transformers_hip",
+            recipe_version="1.0.0",
+            output_dir=str(build_dir),
+        )
+
+        mock_obs = MagicMock()
+        mock_obs.observe.return_value = non_amd_detection_report
+
+        mock_mat = MagicMock()
+        mock_mat.materialize.return_value = MaterializedModel(
+            local_path=str(tmp_path / "snap"),
+            mode=MaterializationMode.FULL_WEIGHTS,
+            files=["config.json", "model.safetensors"],
+            has_weights=True,
+            weights_size_bytes=1000,
+            cached=True,
+        )
+
+        mock_insp = MagicMock()
+        mock_insp.inspect.return_value = sample_qwen_spec
+
+        executor = ForgeExecutor(materializer=mock_mat, inspector=mock_insp, observer=mock_obs)
+        manifest = executor.execute(
+            plan=plan,
+            download_weights=True,
+            force=True,
+            execute_inference=True,
+        )
+
+        assert manifest.status == BuildStatus.PREPARED
+        assert manifest.amd_validated is False
+        exec_step = next(s for s in manifest.steps if s.name == "execute_inference")
+        assert exec_step.status == StepStatus.SKIPPED
+        assert "no AMD ROCm GPU detected" in exec_step.message
+
+    def test_execute_inference_amd_success(
+        self,
+        tmp_path: Path,
+        sample_qwen_spec: ModelSpec,
+        amd_detection_report: DetectionReport,
+    ) -> None:
+        """On AMD GPU hosts, execute_inference=True invokes launcher and transitions to EXECUTED."""
+        build_dir = tmp_path / "bld_amd_success"
+        plan = ForgePlan(
+            plan_id="plan_test_amd",
+            model_id="Qwen/Qwen2.5-0.5B-Instruct",
+            revision=SAMPLE_COMMIT_SHA,
+            precision="fp16",
+            recipe_id="pytorch_transformers_hip",
+            recipe_version="1.0.0",
+            output_dir=str(build_dir),
+        )
+
+        mock_obs = MagicMock()
+        mock_obs.observe.return_value = amd_detection_report
+
+        mock_mat = MagicMock()
+        mock_mat.materialize.return_value = MaterializedModel(
+            local_path=str(tmp_path / "snap"),
+            mode=MaterializationMode.FULL_WEIGHTS,
+            files=["config.json", "model.safetensors"],
+            has_weights=True,
+            weights_size_bytes=1000,
+            cached=True,
+        )
+
+        mock_insp = MagicMock()
+        mock_insp.inspect.return_value = sample_qwen_spec
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps({
+            "status": "SUCCESS",
+            "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "revision": SAMPLE_COMMIT_SHA,
+            "device": "cuda:0",
+            "precision": "fp16",
+            "prompt": "Hello",
+            "generated_text": "Open-source AI acceleration powers the future.",
+            "tokens_generated": 16,
+            "load_time_seconds": 0.45,
+            "generation_time_seconds": 0.20,
+            "tokens_per_second": 80.0,
+        })
+        mock_proc.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_proc) as mock_sub:
+            executor = ForgeExecutor(materializer=mock_mat, inspector=mock_insp, observer=mock_obs)
+            manifest = executor.execute(
+                plan=plan,
+                download_weights=True,
+                force=True,
+                execute_inference=True,
+            )
+
+            assert mock_sub.called
+            assert manifest.status == BuildStatus.EXECUTED
+            assert manifest.amd_validated is True
+            exec_step = next(s for s in manifest.steps if s.name == "execute_inference")
+            assert exec_step.status == StepStatus.SUCCESS
+            assert exec_step.details["tokens_generated"] == 16
+            assert exec_step.details["tokens_per_second"] == 80.0
+
+    def test_execute_inference_amd_failure(
+        self,
+        tmp_path: Path,
+        sample_qwen_spec: ModelSpec,
+        amd_detection_report: DetectionReport,
+    ) -> None:
+        """When launcher exits with non-zero returncode on AMD, manifest reflects FAILED."""
+        build_dir = tmp_path / "bld_amd_failure"
+        plan = ForgePlan(
+            plan_id="plan_test_amd_fail",
+            model_id="Qwen/Qwen2.5-0.5B-Instruct",
+            revision=SAMPLE_COMMIT_SHA,
+            precision="fp16",
+            recipe_id="pytorch_transformers_hip",
+            recipe_version="1.0.0",
+            output_dir=str(build_dir),
+        )
+
+        mock_obs = MagicMock()
+        mock_obs.observe.return_value = amd_detection_report
+
+        mock_mat = MagicMock()
+        mock_mat.materialize.return_value = MaterializedModel(
+            local_path=str(tmp_path / "snap"),
+            mode=MaterializationMode.FULL_WEIGHTS,
+            files=["config.json", "model.safetensors"],
+            has_weights=True,
+            weights_size_bytes=1000,
+            cached=True,
+        )
+
+        mock_insp = MagicMock()
+        mock_insp.inspect.return_value = sample_qwen_spec
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = json.dumps({"status": "FAILED", "error": "CUDA out of memory."})
+        mock_proc.stderr = "RuntimeError: CUDA out of memory."
+
+        with patch("subprocess.run", return_value=mock_proc):
+            executor = ForgeExecutor(materializer=mock_mat, inspector=mock_insp, observer=mock_obs)
+            manifest = executor.execute(
+                plan=plan,
+                download_weights=True,
+                force=True,
+                execute_inference=True,
+            )
+
+            assert manifest.status == BuildStatus.FAILED
+            assert manifest.amd_validated is False
+            exec_step = next(s for s in manifest.steps if s.name == "execute_inference")
+            assert exec_step.status == StepStatus.FAILED
+            assert "CUDA out of memory" in exec_step.message
+
+    def test_execute_build_missing_script(self, tmp_path: Path) -> None:
+        """Calling execute_build on empty dir returns FAILED ExecutionResult."""
+        executor = ForgeExecutor()
+        res = executor.execute_build(tmp_path)
+        assert res.status.value == "FAILED"
+        assert "not found" in (res.error_message or "")
+        assert res.exit_code == 1
+
+    def test_cli_forge_execute_subcommand(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        non_amd_detection_report: DetectionReport,
+    ) -> None:
+        """CLI rocmhub forge execute works and outputs JSON."""
+        build_dir = tmp_path / "cli_exec_test"
+        build_dir.mkdir()
+        launcher = build_dir / "run_inference.py"
+        launcher.write_text("#!/usr/bin/env python3\nprint('hello')\n")
+
+        with patch("rocmhub.forge.executor.SystemObserver") as mock_obs_cls:
+            mock_obs = MagicMock()
+            mock_obs.observe.return_value = non_amd_detection_report
+            mock_obs_cls.return_value = mock_obs
+
+            # Without AMD GPU, default --device cuda returns SKIPPED with exit code 0
+            exit_code = main(["forge", "execute", str(build_dir), "--json"])
+            assert exit_code == 0
+            captured = capsys.readouterr()
+            data = json.loads(captured.out)
+            assert data["status"] == "SKIPPED"
+            assert data["amd_validated"] is False
+

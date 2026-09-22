@@ -6,11 +6,11 @@ ROCmHub is an open-source platform designed to automate the preparation, optimiz
 
 ---
 
-## Current Status: Phase 16 (CI, Licensing & Repository Hygiene Complete)
+## Current Status: Phase 17 (AMD Execution Readiness Complete)
 
-ROCmHub features a complete platform stack validated by real Google Chrome E2E browser testing and multi-version CI:
+ROCmHub features a complete platform stack validated by real Google Chrome E2E browser testing, multi-version CI, and standalone AMD inference execution harness:
 - **Core Domain Engine**: Model acquisition, static inspection, hardware detection, Benchmark Guard, and reproducible artifact builder.
-- **Model Forge**: Automated preparation and reproducible recipe generation for open causal language models (`pytorch_transformers_hip`).
+- **Model Forge & Execution Readiness**: Automated preparation, reproducible recipe generation (`pytorch_transformers_hip`), standalone execution harness with timeout and stdout/stderr capture, and `rocmhub forge execute` CLI.
 - **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery with structured trajectory and executive reports.
 - **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines (truthful `NOT_MEASURED` semantics on non-ROCm hosts).
 - **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, cooperative cancellation, and crash recovery.
@@ -113,6 +113,12 @@ rocmhub env
 
 # Inspect model metadata
 rocmhub inspect Qwen/Qwen2.5-0.5B-Instruct
+
+# Forge a reproducible AMD execution build
+rocmhub forge build Qwen/Qwen2.5-0.5B-Instruct --output-dir builds/qwen2.5
+
+# Execute standalone inference build on AMD ROCm GPU
+rocmhub forge execute builds/qwen2.5 --prompt "Hello AMD" --max-new-tokens 32
 
 # Run benchmark pipeline
 rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16

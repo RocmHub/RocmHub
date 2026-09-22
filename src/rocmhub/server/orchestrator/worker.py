@@ -112,11 +112,13 @@ def _execute_forge_build(
 
     emit("BUILDING", "RUNNING", f"Executing build steps in {output_dir} (download_weights={allow_full_weights})", None, None)
 
+    execute_inference = request_data.get("execute_inference", False)
     executor = ForgeExecutor()
     manifest = executor.execute(
         plan=plan,
         download_weights=allow_full_weights,
         force=True,
+        execute_inference=execute_inference,
     )
 
     domain_status = manifest.status.value

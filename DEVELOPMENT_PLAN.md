@@ -414,13 +414,15 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] Documentation alignment and removal of unverified/false claims across `README.md`, `DEVELOPMENT_PLAN.md`, and `ARCHITECTURE.md`.
 - **Verification**: Full test suite pass across backend and frontend, clean linting and typing.
 
-### Phase 17: AMD Execution Readiness (IN PROGRESS)
-- [ ] Direct launcher execution validation for materialized models on AMD ROCm hardware (`run_inference.py`).
-- [ ] Safe subprocess execution harness with stdout/stderr capture, timeout bounds, and exit code validation.
-- [ ] Bridge ForgeExecutor `execute_inference` to real launcher execution when ROCm GPU is available.
-- [ ] Truthful execution status transition: `PREPARED` -> `EXECUTED` upon verified model generation with `amd_validated=True`.
-- [ ] Comprehensive unit and integration test coverage for execution readiness.
-- **Verification**: Tests validating both fallback (non-AMD host cleanly skips with `PREPARED`) and simulated/live AMD execution (`EXECUTED`).
+### Phase 17: AMD Execution Readiness (COMPLETED)
+- [x] Direct launcher execution validation for materialized models on AMD ROCm hardware (`run_inference.py`).
+- [x] Structured JSON output mode (`--json`) added to standalone launcher template with execution metrics (load time, generation time, tokens per second, exit code).
+- [x] Safe subprocess execution harness (`ForgeExecutor.execute_build`) with stdout/stderr capture, timeout bounds, and exit code validation.
+- [x] Bridge ForgeExecutor `execute_inference` to real launcher execution when ROCm GPU is available.
+- [x] Truthful execution status transition: `PREPARED` -> `EXECUTED` upon verified model generation with `amd_validated=True`.
+- [x] CLI command: `rocmhub forge execute <build_dir> [--prompt <text>] [--device <id>] [--max-new-tokens <n>] [--timeout <sec>] [--json]`.
+- [x] Worker integration: forwarded `execute_inference` flag from orchestrator payload to ForgeExecutor.
+- **Verification**: 352 Pytest unit tests passed (+5 new tests in `TestForgeExecutionReadiness`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean.
 
 ---
 

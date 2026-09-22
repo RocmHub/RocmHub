@@ -242,24 +242,34 @@ def main() -> int:
         default="cuda",
         help="Device to run on ('cuda' maps to HIP on ROCm).",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output execution outcome as structured JSON to stdout.",
+    )
     args = parser.parse_args()
 
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
-        sys.stderr.write(f"Missing dependencies: {{exc}}\\n")
-        sys.stderr.write("Install with: pip install torch transformers\\n")
+        if args.json:
+            print(json.dumps({{"status": "FAILED", "error": f"Missing dependencies: {{exc}}"}}))
+        else:
+            sys.stderr.write(f"Missing dependencies: {{exc}}\\n")
+            sys.stderr.write("Install with: pip install torch transformers\\n")
         return 1
 
     device_str = args.device
     if device_str == "cuda" and not torch.cuda.is_available():
-        sys.stderr.write("WARNING: CUDA/HIP not available. Falling back to CPU.\\n")
+        if not args.json:
+            sys.stderr.write("WARNING: CUDA/HIP not available. Falling back to CPU.\\n")
         device_str = "cpu"
 
     model_location = r"""{weights_path or model_id}"""
-    print(f"Loading model: {model_id} (revision: {revision[:8] if len('{revision}') >= 8 else '{revision}'})")
-    print(f"Device: {{device_str}}, Precision: {precision}")
+    if not args.json:
+        print(f"Loading model: {model_id} (revision: {revision[:8] if len('{revision}') >= 8 else '{revision}'})")
+        print(f"Device: {{device_str}}, Precision: {precision}")
 
     dtype_map = {{
         "float16": torch.float16,
@@ -268,51 +278,77 @@ def main() -> int:
     }}
     torch_dtype = dtype_map.get("{dtype_str}", torch.float32)
     if device_str == "cpu" and torch_dtype == torch.float16:
-        print("Note: CPU inference with float16 is typically unsupported or slow; using float32 on CPU.")
+        if not args.json:
+            print("Note: CPU inference with float16 is typically unsupported or slow; using float32 on CPU.")
         torch_dtype = torch.float32
 
     t0 = time.perf_counter()
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_location,
-        revision="{revision}",
-        trust_remote_code=False,
-    )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_location,
-        revision="{revision}",
-        torch_dtype=torch_dtype,
-        trust_remote_code=False,
-    )
-    model.to(device_str)
-    model.eval()
-    load_time = time.perf_counter() - t0
-    print(f"Model loaded successfully in {{load_time:.2f}}s.")
-
-    inputs = tokenizer(args.prompt, return_tensors="pt").to(device_str)
-    print(f"Input prompt: {{args.prompt!r}}")
-    print("Generating...")
-
-    t1 = time.perf_counter()
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            pad_token_id=tokenizer.pad_token_id,
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_location,
+            revision="{revision}",
+            trust_remote_code=False,
         )
-    gen_time = time.perf_counter() - t1
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    new_tokens = output_ids[0][inputs["input_ids"].shape[1] :]
-    output_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    tokens_generated = len(new_tokens)
-    tps = tokens_generated / gen_time if gen_time > 0 else 0.0
+        model = AutoModelForCausalLM.from_pretrained(
+            model_location,
+            revision="{revision}",
+            torch_dtype=torch_dtype,
+            trust_remote_code=False,
+        )
+        model.to(device_str)
+        model.eval()
+        load_time = time.perf_counter() - t0
+        if not args.json:
+            print(f"Model loaded successfully in {{load_time:.2f}}s.")
 
-    print(f"Generated text: {{output_text!r}}")
-    print(f"Tokens: {{tokens_generated}}, Generation time: {{gen_time:.3f}}s ({{tps:.1f}} tok/s)")
-    return 0
+        inputs = tokenizer(args.prompt, return_tensors="pt").to(device_str)
+        if not args.json:
+            print(f"Input prompt: {{args.prompt!r}}")
+            print("Generating...")
+
+        t1 = time.perf_counter()
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        gen_time = time.perf_counter() - t1
+
+        new_tokens = output_ids[0][inputs["input_ids"].shape[1] :]
+        output_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        tokens_generated = len(new_tokens)
+        tps = tokens_generated / gen_time if gen_time > 0 else 0.0
+
+        if args.json:
+            res_payload = {{
+                "status": "SUCCESS",
+                "model_id": "{model_id}",
+                "revision": "{revision}",
+                "device": device_str,
+                "precision": "{precision}",
+                "prompt": args.prompt,
+                "generated_text": output_text,
+                "tokens_generated": tokens_generated,
+                "load_time_seconds": round(load_time, 4),
+                "generation_time_seconds": round(gen_time, 4),
+                "tokens_per_second": round(tps, 2),
+            }}
+            print(json.dumps(res_payload))
+        else:
+            print(f"Generated text: {{output_text!r}}")
+            print(f"Tokens: {{tokens_generated}}, Generation time: {{gen_time:.3f}}s ({{tps:.1f}} tok/s)")
+        return 0
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({{"status": "FAILED", "error": str(exc)}}))
+        else:
+            sys.stderr.write(f"Inference error: {{exc}}\\n")
+        return 1
 
 
 if __name__ == "__main__":

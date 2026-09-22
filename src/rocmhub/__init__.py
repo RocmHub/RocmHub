@@ -47,6 +47,20 @@ from rocmhub.core.types import (
     ValidationRunResult,
     ValidationVerdict,
 )
+from rocmhub.forge import (
+    BuildManifest,
+    BuildStatus,
+    BuildStepRecord,
+    BuildStepSpec,
+    ForgeExecutor,
+    ForgePlan,
+    ForgePlanner,
+    ForgeRecipe,
+    MaterializedModel,
+    ModelMaterializer,
+    PyTorchTransformersHipRecipe,
+    StepStatus,
+)
 from rocmhub.guard import (
     DEFAULT_GUARD_POLICY,
     ABBASequence,
@@ -105,4 +119,16 @@ __all__ = [
     "BenchmarkGuard",
     "ABBASequence",
     "DEFAULT_GUARD_POLICY",
+    "BuildStatus",
+    "StepStatus",
+    "BuildStepSpec",
+    "BuildStepRecord",
+    "MaterializedModel",
+    "ForgePlan",
+    "ForgeRecipe",
+    "PyTorchTransformersHipRecipe",
+    "ForgePlanner",
+    "ModelMaterializer",
+    "BuildManifest",
+    "ForgeExecutor",
 ]

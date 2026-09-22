@@ -235,3 +235,39 @@ class NotImplementedFeatureError(ROCmHubError):
     """Raised when a feature planned for a future phase is requested."""
 
     error_code = "NOT_IMPLEMENTED"
+
+
+class ForgeError(ROCmHubError):
+    """Base exception for all Model Forge operations."""
+
+    error_code = "FORGE_ERROR"
+
+
+class UnsupportedModelArchitectureError(ForgeError):
+    """Raised when a model architecture is unsupported by the selected recipe."""
+
+    error_code = "UNSUPPORTED_MODEL_ARCHITECTURE"
+
+
+class InsufficientDiskSpaceError(ForgeError):
+    """Raised when required disk space exceeds available free disk space."""
+
+    error_code = "INSUFFICIENT_DISK_SPACE"
+
+
+class ModelMaterializationError(ForgeError):
+    """Raised when materializing (downloading or linking) model weights/config fails."""
+
+    error_code = "MODEL_MATERIALIZATION_FAILED"
+
+
+class BuildExecutionError(ForgeError):
+    """Raised when executing a recipe build step fails."""
+
+    error_code = "BUILD_EXECUTION_FAILED"
+
+
+class BuildConflictError(ForgeError):
+    """Raised when a build output directory already exists and conflict handling fails."""
+
+    error_code = "BUILD_CONFLICT"

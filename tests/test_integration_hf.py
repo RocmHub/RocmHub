@@ -267,3 +267,40 @@ def test_live_guard_qwen_model_on_current_mac(
     captured_text = capsys.readouterr()
     assert "Guard Verdict:             NOT_MEASURED" in captured_text.out
     assert "NO_BENCHMARK_EXECUTION" in captured_text.out
+
+
+@pytest.mark.network
+@pytest.mark.integration
+def test_live_forge_plan_qwen_metadata_only(capsys: pytest.CaptureFixture[str]) -> None:
+    """Live integration test: rocmhub forge plan resolves Qwen2.5-0.5B metadata without downloading weights."""
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    # 1. Test pure JSON output
+    exit_code_json = main(["forge", "plan", model_id, "--json"])
+    assert exit_code_json == 0
+
+    captured = capsys.readouterr()
+    plan_dict = json.loads(captured.out)
+
+    assert plan_dict["model_id"] == model_id
+    assert len(plan_dict["revision"]) == 40
+    assert all(c in "0123456789abcdef" for c in plan_dict["revision"])
+    assert plan_dict["recipe_id"] == "pytorch_transformers_hip"
+    assert plan_dict["precision"] == "fp16"
+    assert plan_dict["estimated_disk_space_bytes"] > 500_000_000  # ~1.1GB
+    assert len(plan_dict["steps"]) == 5
+    assert plan_dict["steps"][0]["name"] == "check_prerequisites"
+    assert plan_dict["steps"][1]["name"] == "materialize_model"
+    assert plan_dict["steps"][4]["name"] == "verify_build"
+
+    # 2. Test human-readable formatted output
+    exit_code_text = main(["forge", "plan", model_id])
+    assert exit_code_text == 0
+
+    captured_text = capsys.readouterr()
+    assert "ROCmHub Model Forge Plan" in captured_text.out
+    assert "Plan ID:" in captured_text.out
+    assert model_id in captured_text.out
+    assert "pytorch_transformers_hip" in captured_text.out
+    assert "Planned Build Steps:" in captured_text.out
+

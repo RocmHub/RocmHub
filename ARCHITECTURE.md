@@ -59,9 +59,13 @@ ROCmHub is an open-source platform designed to automate the preparation, optimiz
 rocmhub/
 ├── models/        # Model fetching, caching, and structural inspection
 ├── hardware/      # AMD GPU discovery, gfx target detection, ROCm environment specs
+├── capabilities/  # Capability matching and baseline execution evaluation
 ├── runners/       # Pluggable backend adapters (Baseline HF/PyTorch, future vLLM, SGLang)
 ├── benchmarks/    # Isolated benchmarking harness, metric collectors (TTFT, ITL, VRAM)
+├── validation/    # Hard correctness checks & comparative quality retention
 ├── artifacts/     # Manifest generation, schema validation, artifact packaging
+├── guard/         # Independent Benchmark Guard, stability checks, and reproducibility gate
+├── forge/         # Model Forge: automated model preparation and build execution
 └── cli/           # Developer command-line interface
 ```
 
@@ -158,6 +162,31 @@ rocmhub/
 - **Headline Summary Recomputation**: Audits recorded headline metrics directly against raw individual token timestamps. Catches divergence or manual metric tampering.
 - **Calibration Reference Runs**: Compares before/after microbenchmarks (e.g. GEMM kernels) to isolate thermal or cluster-level drift.
 - **Diagnostic Mode Integrity**: Preflight-skipped/diagnostic artifacts evaluate strictly to `GuardVerdict.NOT_MEASURED` (reason: `NO_BENCHMARK_EXECUTION`, exit code 2).
+
+### 3.8 `rocmhub.forge`
+- **Mission**: *Automated preparation and configuration of open-source models for AMD GPUs.*
+- **Independence**: Decoupled from artifact bundles and verification gates. Does not duplicate multi-gigabyte weight tensors.
+- **`ForgePlanner`**: Generates deterministic, reproducible build plans (`ForgePlan`) without downloading full weight tensors:
+  - Resolves immutable 40-character Git commit SHA via `ModelInspector`.
+  - Matches and validates build recipe (`ForgeRecipe`).
+  - Gated capability check: validates target hardware and confirms compatibility via `CapabilityEvaluator`.
+  - Accurately estimates required disk space based on model parameter count, precision (`fp16`, `bf16`, `fp32`), and safe margin.
+- **`ModelMaterializer`**: Acquires model configs and weights using immutable commit SHA and standard caching:
+  - Strict preflight disk space verification before initiating download (`InsufficientDiskSpaceError`).
+  - Strict enforcement of `trust_remote_code=False`.
+  - Translates gated repo (`AuthRequiredError`) and missing repo (`ModelNotFoundError`) failures cleanly.
+  - Supports `--no-weights` for lightweight metadata/configuration materialization.
+- **`ForgeRecipe` (Protocol) & `PyTorchTransformersHipRecipe`**:
+  - Recipe for causal language models (`Qwen2ForCausalLM`, `LlamaForCausalLM`, etc.) on `pytorch_transformers_hip`.
+  - Produces runtime configuration (`runtime_config.json`), model configuration (`model_config.json`), and executable standalone launch script (`run_inference.py`).
+- **`ForgeExecutor`**:
+  - Orchestrates ordered build steps: `check_prerequisites`, `materialize_model`, `configure_runtime`, `generate_launch_scripts`, `verify_build`.
+  - Verifies generated outputs and records SHA-256 digests.
+  - Non-AMD behavior: cleanly marks build status as `PREPARED` with `amd_validated = False`. Real execution step skipped without simulating AMD inference.
+  - Writes canonical, secret-scanned `build_manifest.json`.
+- **CLI Commands**:
+  - `rocmhub forge plan <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--json]`
+  - `rocmhub forge build <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--force] [--no-weights] [--execute] [--json]`
 
 ---
 

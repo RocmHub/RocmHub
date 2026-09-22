@@ -242,7 +242,42 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Exit codes: 0 (PASS), 2 (NOT_MEASURED), 3 (FAIL), 4 (INCONCLUSIVE), 1 (Error).
 - **Verification**: 244 offline tests (16 new Phase 9 tests) + 7 live network integration tests. Ruff clean. Mypy clean. Real CLI verification on macOS returns `NOT_MEASURED` with code 2.
 
-### Phase 10: Verified Gate & Registry Preparation
+### Phase 10: Model Forge Foundation (COMPLETED)
+**Objective: Automated preparation and compilation of open-source models for AMD GPUs.**
+- [x] Implement `src/rocmhub/forge/base.py`:
+  - `BuildStatus`: Enum (`PREPARED`, `EXECUTED`, `FAILED`).
+  - `StepStatus`: Enum (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `SKIPPED`).
+  - `BuildStepSpec`, `BuildStepRecord`, `MaterializedModel`.
+  - `ForgePlan`: deterministic hash, model ID, immutable 40-char SHA, precision, target GPU, recipe, steps, estimated disk bytes.
+- [x] Implement `src/rocmhub/forge/recipes.py`:
+  - `ForgeRecipe` protocol and `PyTorchTransformersHipRecipe` (v1.0.0, `pytorch_transformers_hip`).
+  - Causal language model matching (`Qwen2ForCausalLM`, `LlamaForCausalLM`, etc.).
+  - Supported precisions (`fp16`, `bf16`, `fp32`).
+  - Generates `runtime_config.json`, `model_config.json`, `recipe.json`, and executable `run_inference.py`.
+- [x] Implement `src/rocmhub/forge/planner.py`:
+  - `ForgePlanner.create_plan()`: resolves immutable 40-char commit SHA via `ModelInspector` without downloading weight tensors.
+  - Matches recipe, validates architecture and precision.
+  - Detects target GPU from `SystemObserver` and confirms compatibility via `CapabilityEvaluator`.
+  - Computes required disk space with safety margin.
+- [x] Implement `src/rocmhub/forge/materializer.py`:
+  - `ModelMaterializer`: preflight disk space checks (`InsufficientDiskSpaceError`).
+  - Enforces `trust_remote_code=False` and uses immutable commit SHA.
+  - Handles gated repo (`AuthRequiredError`) and missing repo (`ModelNotFoundError`).
+  - Supports `--no-weights` for fast metadata-only materialization.
+- [x] Implement `src/rocmhub/forge/manifest.py`:
+  - `BuildManifest` schema recording build ID, plan ID, status, runtime, steps, and artifact checksums.
+  - Secret sanitization: redacting tokens and API keys, asserting zero leaked credentials.
+  - Atomic, canonical JSON writer (`write_manifest()`).
+- [x] Implement `src/rocmhub/forge/executor.py`:
+  - `ForgeExecutor.execute()`: executes build steps (`check_prerequisites`, `materialize_model`, `configure_runtime`, `generate_launch_scripts`, `verify_build`).
+  - Manages build directory, detects conflicts without `--force` (`BuildConflictError`).
+  - Non-AMD behavior: marks status `PREPARED`, `amd_validated = False`. Execution step cleanly skipped without fake AMD inference.
+- [x] CLI commands:
+  - `rocmhub forge plan <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--json]`
+  - `rocmhub forge build <model_id> [--revision] [--precision] [--target-gpu] [--output-dir] [--recipe] [--force] [--no-weights] [--execute] [--json]`
+- **Verification**: 272 offline unit tests (28 new Phase 10 tests) + 8 live network integration tests (all passing). Ruff clean. Mypy clean.
+
+### Phase 11: Verified Gate & Registry Preparation
 - [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
 - [ ] Local and remote registry packaging.
 - **Verification**: End-to-end certification workflow test.

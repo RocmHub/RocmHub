@@ -28,6 +28,12 @@ from rocmhub.core.types import (
     ValidationReport,
     ValidationVerdict,
 )
+from rocmhub.forge import (
+    BuildManifest,
+    ForgeExecutor,
+    ForgePlan,
+    ForgePlanner,
+)
 from rocmhub.guard import BenchmarkGuard
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.models.huggingface import HuggingFaceModelSource
@@ -353,6 +359,129 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output ReproducibilityReport as pure JSON on stdout.",
+    )
+
+    # Command: forge
+    forge_parser = subparsers.add_parser(
+        "forge",
+        help="Automated preparation and compilation of models for AMD GPUs.",
+    )
+    forge_subparsers = forge_parser.add_subparsers(
+        dest="forge_action",
+        help="Forge action to perform",
+    )
+
+    # Action: forge plan
+    forge_plan_parser = forge_subparsers.add_parser(
+        "plan",
+        help="Generate a reproducible build plan for a model without downloading full weights.",
+    )
+    forge_plan_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    forge_plan_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    forge_plan_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    forge_plan_parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Target precision (default: 'fp16').",
+    )
+    forge_plan_parser.add_argument(
+        "--target-gpu",
+        default=None,
+        help="Target AMD GPU architecture (e.g. gfx90a, gfx1100).",
+    )
+    forge_plan_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Target build output directory.",
+    )
+    forge_plan_parser.add_argument(
+        "--recipe",
+        default=None,
+        help="Specific build recipe ID to use.",
+    )
+    forge_plan_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output ForgePlan as pure JSON on stdout.",
+    )
+
+    # Action: forge build
+    forge_build_parser = forge_subparsers.add_parser(
+        "build",
+        help="Materialize model and generate verified build configuration for AMD ROCm.",
+    )
+    forge_build_parser.add_argument(
+        "model_id",
+        nargs="?",
+        default=None,
+        help="Model repository or ID (e.g. 'Qwen/Qwen2.5-0.5B-Instruct').",
+    )
+    forge_build_parser.add_argument(
+        "--model",
+        dest="model_opt",
+        required=False,
+        help="Alternative flag for model ID.",
+    )
+    forge_build_parser.add_argument(
+        "--revision",
+        default="main",
+        help="Model branch, tag, or commit revision (default: 'main').",
+    )
+    forge_build_parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Target precision (default: 'fp16').",
+    )
+    forge_build_parser.add_argument(
+        "--target-gpu",
+        default=None,
+        help="Target AMD GPU architecture (e.g. gfx90a, gfx1100).",
+    )
+    forge_build_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Target build output directory.",
+    )
+    forge_build_parser.add_argument(
+        "--recipe",
+        default=None,
+        help="Specific build recipe ID to use.",
+    )
+    forge_build_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force overwrite existing build output directory.",
+    )
+    forge_build_parser.add_argument(
+        "--no-weights",
+        action="store_true",
+        help="Materialize configs and metadata only, skipping tensor weights.",
+    )
+    forge_build_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Attempt real baseline execution on AMD GPU if available.",
+    )
+    forge_build_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output BuildManifest as pure JSON on stdout.",
     )
 
     return parser
@@ -709,6 +838,62 @@ def _format_reproducibility_report(report: ReproducibilityReport) -> str:
         lines.append("Warnings:")
         for w in report.warnings:
             lines.append(f"  - {w}")
+
+    return "\n".join(lines)
+
+
+def _format_forge_plan(plan: ForgePlan) -> str:
+    """Format ForgePlan into a clean human-readable summary table."""
+    lines = [
+        "ROCmHub Model Forge Plan",
+        "-" * 80,
+        f"{'Plan ID:':<26} {plan.plan_id}",
+        f"{'Model:':<26} {plan.model_id}",
+        f"{'Revision:':<26} {plan.revision}",
+        f"{'Target GPU:':<26} {plan.target_gpu or 'Auto-detected / None'}",
+        f"{'Precision:':<26} {plan.precision}",
+        f"{'Recipe:':<26} {plan.recipe_id} (v{plan.recipe_version})",
+        f"{'Estimated Disk Space:':<26} {plan.estimated_disk_space_bytes / (1024**3):.2f} GB ({plan.estimated_disk_space_bytes:,} bytes)",
+        f"{'Compatibility:':<26} {'CONFIRMED (READY)' if plan.compatibility_confirmed else 'NO AMD GPU / NOT CONFIRMED'}",
+        f"{'Output Directory:':<26} {plan.output_dir}",
+        "",
+        "Planned Build Steps:",
+    ]
+    for i, step in enumerate(plan.steps, start=1):
+        lines.append(f"  {i}. {step.name:<24} {step.description}")
+    return "\n".join(lines)
+
+
+def _format_build_manifest(manifest: BuildManifest) -> str:
+    """Format BuildManifest into clean human-readable output."""
+    lines = [
+        "ROCmHub Model Forge Build",
+        "-" * 80,
+        f"{'Build ID:':<26} {manifest.build_id}",
+        f"{'Plan ID:':<26} {manifest.plan_id}",
+        f"{'Model:':<26} {manifest.model_id}",
+        f"{'Revision:':<26} {manifest.revision}",
+        f"{'Target GPU:':<26} {manifest.target_gpu or 'Auto-detected / None'}",
+        f"{'Precision:':<26} {manifest.precision}",
+        f"{'Recipe:':<26} {manifest.recipe_id} (v{manifest.recipe_version})",
+        f"{'Runtime:':<26} {manifest.runtime}",
+        f"{'Build Status:':<26} {manifest.status.value}",
+        f"{'AMD Validated:':<26} {'yes' if manifest.amd_validated else 'no (PREPARED on non-AMD)'}",
+        f"{'Build Directory:':<26} {manifest.build_dir}",
+        f"{'Weights Path:':<26} {manifest.weights_path or '(metadata only)'}",
+        "",
+        "Executed Steps:",
+    ]
+    for step in manifest.steps:
+        status_tag = f"[{step.status.value}]"
+        lines.append(f"  {status_tag:<11} {step.name:<24} ({step.duration_seconds:.3f}s) {step.message or ''}")
+
+    if manifest.artifacts:
+        lines.append("")
+        lines.append("Generated Artifacts:")
+        for fname, digest in sorted(manifest.artifacts.items()):
+            digest_short = digest[:12] + "..." if len(digest) > 12 else digest
+            lines.append(f"  - {fname:<24} (sha256: {digest_short})")
 
     return "\n".join(lines)
 
@@ -1281,6 +1466,69 @@ def main(args: Optional[List[str]] = None) -> int:
         except Exception as exc:
             sys.stderr.write(f"Unexpected error in guard: {exc}\n")
             return 1
+
+    if parsed_args.command == "forge":
+        if not getattr(parsed_args, "forge_action", None):
+            build_parser().parse_args(["forge", "--help"])
+            return 0
+
+        model_id = parsed_args.model_opt or parsed_args.model_id
+        if not model_id:
+            sys.stderr.write("Error: Model ID must be specified either as positional argument or via --model.\n")
+            return 1
+
+        if parsed_args.forge_action == "plan":
+            try:
+                planner = ForgePlanner()
+                plan = planner.create_plan(
+                    model_id=model_id,
+                    revision=parsed_args.revision,
+                    precision=parsed_args.precision,
+                    target_gpu=parsed_args.target_gpu,
+                    output_dir=parsed_args.output_dir,
+                    recipe_id=parsed_args.recipe,
+                )
+                if parsed_args.json:
+                    sys.stdout.write(plan.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_forge_plan(plan) + "\n")
+                return 0
+            except ROCmHubError as exc:
+                sys.stderr.write(f"Forge plan error: {exc}\n")
+                return 1
+            except Exception as exc:
+                sys.stderr.write(f"Unexpected error creating forge plan: {exc}\n")
+                return 1
+
+        if parsed_args.forge_action == "build":
+            try:
+                planner = ForgePlanner()
+                plan = planner.create_plan(
+                    model_id=model_id,
+                    revision=parsed_args.revision,
+                    precision=parsed_args.precision,
+                    target_gpu=parsed_args.target_gpu,
+                    output_dir=parsed_args.output_dir,
+                    recipe_id=parsed_args.recipe,
+                )
+                executor = ForgeExecutor()
+                build_manifest = executor.execute(
+                    plan=plan,
+                    download_weights=not parsed_args.no_weights,
+                    force=parsed_args.force,
+                    execute_inference=parsed_args.execute,
+                )
+                if parsed_args.json:
+                    sys.stdout.write(build_manifest.to_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(_format_build_manifest(build_manifest) + "\n")
+                return 0
+            except ROCmHubError as exc:
+                sys.stderr.write(f"Forge build error: {exc}\n")
+                return 1
+            except Exception as exc:
+                sys.stderr.write(f"Unexpected error during forge build: {exc}\n")
+                return 1
 
     return 0
 

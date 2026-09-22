@@ -9,7 +9,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from rocmhub.server.config import ServerConfig
 from rocmhub.server.orchestrator.db import DatabaseManager
@@ -119,6 +119,16 @@ class JobManager:
     def get_job(self, job_id: str) -> Optional[JobResponse]:
         """Get job status and metadata."""
         return self.db.get_job(job_id)
+
+    def list_jobs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        status: Optional[JobStatus] = None,
+        job_type: Optional[JobType] = None,
+    ) -> Tuple[List[JobResponse], int]:
+        """List jobs with pagination, filtering, and newest first."""
+        return self.db.list_jobs(limit=limit, offset=offset, status=status, job_type=job_type)
 
     def get_job_result(self, job_id: str) -> Optional[JobResultResponse]:
         """Get domain result payload for a job."""
@@ -278,7 +288,7 @@ class JobManager:
                 return self.emit_event(job_id, phase, status, msg, err_code, details)
 
             try:
-                job_status, domain_status, resolved_output_dir, result_payload, error_msg, error_code = execute_job(
+                job_status, domain_status, resolved_output_dir, result_payload, error_msg, error_code, resolved_revision = execute_job(
                     job_id=job_id,
                     job_type=JobType(job_data["job_type"]),
                     request_data=job_data["request_payload"],
@@ -296,6 +306,7 @@ class JobManager:
                     result_payload=result_payload,
                     error_message=error_msg,
                     error_code=error_code,
+                    revision=resolved_revision,
                 )
             except Exception as exc:
                 logger.exception("Unexpected error in worker loop for job %s", job_id)

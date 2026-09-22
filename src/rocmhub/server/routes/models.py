@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from rocmhub.capabilities.evaluator import CapabilityEvaluator
 from rocmhub.core.errors import (
     AuthRequiredError,
     InvalidModelMetadataError,
@@ -38,6 +40,21 @@ async def get_model_info(
         detection_report = observer.observe()
         gpus = detection_report.gpus
 
+        evaluator = CapabilityEvaluator()
+        cap_report = evaluator.evaluate(model_spec, detection_report)
+
+        rocm_gpus = [g for g in gpus if g.gpu_vendor and g.gpu_vendor.lower() == "amd"]
+        rocm_available = len(rocm_gpus) > 0 and sys.platform != "darwin"
+
+        license_name = None
+        if hasattr(repo_meta, "card_data") and isinstance(repo_meta.card_data, dict):
+            license_name = repo_meta.card_data.get("license")
+        if not license_name:
+            for tag in repo_meta.tags:
+                if tag.startswith("license:"):
+                    license_name = tag.split("license:", 1)[1]
+                    break
+
         return {
             "model_id": model_spec.model_id,
             "requested_revision": model_spec.requested_revision,
@@ -46,11 +63,13 @@ async def get_model_info(
             "parameter_count": model_spec.parameter_count,
             "context_length": model_spec.context_length,
             "weights_format": model_spec.weights_format,
+            "license": license_name,
             "pipeline_tag": repo_meta.pipeline_tag,
             "tags": repo_meta.tags,
             "files_count": len(repo_meta.files),
             "safetensors_metadata": repo_meta.safetensors_metadata,
-            "host_gpus_detected": len(gpus),
+            "rocm_available": rocm_available,
+            "host_gpus_detected": len(rocm_gpus),
             "host_gpu_summary": [
                 {
                     "device_name": g.device_name,
@@ -58,8 +77,20 @@ async def get_model_info(
                     "vram_total_mb": g.vram_total_mb,
                     "gpu_present": g.gpu_present,
                 }
-                for g in gpus
+                for g in rocm_gpus
             ],
+            "compatibility": {
+                "verdict": cap_report.verdict.value,
+                "reasons": [
+                    {
+                        "code": r.code,
+                        "message": r.message,
+                        "severity": r.severity.value,
+                    }
+                    for r in cap_report.reasons
+                ],
+                "warnings": cap_report.warnings,
+            },
         }
 
     except ModelNotFoundError as exc:

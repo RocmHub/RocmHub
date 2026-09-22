@@ -106,3 +106,14 @@ class JobResultResponse(BaseModel):
     completed_at: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+
+
+class JobListResponse(BaseModel):
+    """Paginated list of jobs."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: List[JobResponse]
+    total: int
+    limit: int
+    offset: int

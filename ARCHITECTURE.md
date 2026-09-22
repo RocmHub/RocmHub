@@ -650,8 +650,8 @@ RocmHub/
 │       │   ├── events.py           # SSE formatting, heartbeat, reconnection replay
 │       │   ├── orchestrator/
 │       │   │   ├── __init__.py
-│       │   │   ├── models.py       # JobType, JobStatus, JobCreateRequest, JobResponse, JobEvent
-│       │   │   ├── db.py           # DatabaseManager (SQLite connection, WAL mode, CRUD)
+│       │   │   ├── models.py       # JobType, JobStatus, JobCreateRequest, JobResponse, JobListResponse, JobEvent
+│       │   │   ├── db.py           # DatabaseManager (SQLite connection, WAL mode, CRUD, pagination)
 │       │   │   ├── migrations.py   # Versioned schema migrations
 │       │   │   ├── manager.py      # JobManager (queue, directory locking, cancellation)
 │       │   │   └── worker.py       # Domain execution dispatcher (Forge, Engineer, Optimization)
@@ -665,6 +665,26 @@ RocmHub/
 │           ├── __init__.py
 │           ├── builder.py          # Artifact packaging & manifest generator
 │           └── schema.py           # Manifest serialization & validation
+├── frontend/                       # Modern React 18 + Vite + Tailwind CSS Single-Page App
+│   ├── src/
+│   │   ├── api/                    # Typed API client, SSE streaming client, domain interfaces
+│   │   │   ├── client.ts
+│   │   │   ├── sse.ts
+│   │   │   └── types.ts
+│   │   ├── components/
+│   │   │   ├── common/             # StatusBadge, DomainStatusTag, LogViewer, Navbar, Sidebar
+│   │   │   ├── dashboard/          # DashboardView (telemetry, ROCm banner, jobs table)
+│   │   │   ├── models/             # ModelExplorerView (HF inspector, commit SHA, compatibility)
+│   │   │   ├── forge/              # ForgeStudioView (target GPU, precision, plan, live build)
+│   │   │   ├── engineer/           # AIEngineerView (autonomous agent loop, budget, logs)
+│   │   │   └── optimization/       # OptimizationLabView (candidate comparison, Pareto metrics)
+│   │   ├── App.tsx                 # Root router and layout container
+│   │   ├── main.tsx                # Entrypoint with TanStack QueryClientProvider
+│   │   └── index.css               # Dark industrial palette and utility styling
+│   ├── tests/                      # Unit & component tests (Vitest + React Testing Library)
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tailwind.config.js
 └── tests/
     ├── unit/
     │   ├── test_models.py
@@ -683,19 +703,54 @@ RocmHub/
 
 ---
 
-## 8. Future Extension Points
+## 8. Frontend MVP Architecture (Phase 14)
+
+### 8.1 Architecture & Design System
+- **Framework & Tooling**: React 18, TypeScript, Vite, Tailwind CSS, TanStack Query v5, Lucide React icons.
+- **Palette**: Dark industrial theme matching AMD engineering aesthetic:
+  - Background: `#101014`
+  - Surface / Cards: `#19191F`
+  - Elevated / Inputs / Borders: `#222229` / `#2D2D38`
+  - Primary Accent: `#ED1C24` (AMD Crimson)
+  - Text: `#F5F5F7` (primary), `#A1A1AA` (secondary/muted)
+- **State Management & Polling**:
+  - Global server telemetry polled every 10s via TanStack Query (`useQuery(["health"])`).
+  - Jobs list and active executions polled every 5s (`useQuery(["jobs"])`).
+  - Active execution progress streamed via Server-Sent Events with SSE client.
+
+### 8.2 SSE Client & Live Log Streaming
+- `frontend/src/api/sse.ts`: Custom resilient SSE event consumer:
+  - Connects to `GET /api/v1/jobs/{jobId}/events`.
+  - Supports resume via `?from_event_id=` and `Last-Event-ID` header.
+  - Heartbeat filtering (ignores `: ping\n\n` comments).
+  - Deduplication of incoming events by sequential event ID.
+  - Automatic reconnection with exponential backoff on drop.
+  - Complete abort/cleanup via `AbortController` on component unmount.
+
+### 8.3 Semantic Status Decoupling
+- **HTTP Job Status**: `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` (standard workflow lifecycle).
+- **Domain Status**:
+  - `CONFIG_ONLY`: Build and launch configs generated; tensor weights not downloaded or host lacks AMD accelerator.
+  - `PREPARED`: Full model weights downloaded and validated locally; execution not yet measured.
+  - `EXECUTED`: Actual native inference or optimization performed on AMD GPU.
+  - `NOT_MEASURED`: Baseline or candidate benchmark intentionally unmeasured on non-ROCm hosts to prevent fake metrics.
+
+---
+
+## 9. Future Extension Points
 
 1. **Benchmark Guard & Reproducibility Gate**: *(Completed in Phase 9)* Independent arbiter auditing measurement stability, environment drift, hardware health, and summary truthfulness.
 2. **Model Forge Foundation**: *(Completed in Phase 10)* Deterministic build planning, model materialization, and recipe configuration.
 3. **Autonomous AI Engineer MVP**: *(Completed in Phase 11)* Autonomous preparation of open models on AMD GPUs with bounded execution loop, security boundary, and deterministic fallback.
 4. **Optimization Engine**: *(Completed in Phase 12)* Automated candidate generation, compilation, execution, and objective comparison against immutable baselines.
 5. **Backend API & Job Orchestration**: *(Completed in Phase 13)* Local FastAPI backend, asynchronous job manager with SQLite persistence, SSE streaming, and directory locking.
-6. **Verified Badge / Gate**: *(Phase 14)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
-7. **Alternative Runtimes**:
+6. **Frontend MVP**: *(Completed in Phase 14)* Production-grade React SPA with live SSE streaming, model inspection, Forge studio, AI Engineer workspace, and Optimization Lab.
+7. **Verified Badge / Gate**: *(Phase 15)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
+8. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.
    - `SGLangRunner`: Fast RadixAttention runner.
    - `LlamaCppHipRunner`: Minimal C++ GGUF inference via hipBLAS.
-8. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
-9. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
-10. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
+9. **Quantization Search**: AWQ, GPTQ, and FP8 calibration matrix search tailored to AMD matrix cores.
+10. **Kernel Arena**: Automated JIT compilation and benchmarking of custom AMD Triton and Composable Kernel (CK) attention kernels.
+11. **ROCmHub Registry**: Remote artifact publishing and certified model hub integration.
 

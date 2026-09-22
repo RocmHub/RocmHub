@@ -412,3 +412,78 @@ class TestJobLifecycleAndOrchestration:
         # Now can acquire again
         assert manager._acquire_dir_lock(shared_dir) is True
         manager._release_dir_lock(shared_dir)
+
+    def test_list_jobs_pagination_and_filtering(self, temp_env: Any) -> None:
+        client, _, manager, workspace = temp_env
+
+        # Enqueue multiple jobs
+        manager.enqueue_job(
+            JobCreateRequest(
+                job_type=JobType.FORGE_BUILD,
+                model_id="Qwen/Qwen2.5-0.5B-Instruct",
+                output_dir=str(workspace / "list_1"),
+            )
+        )
+        manager.enqueue_job(
+            JobCreateRequest(
+                job_type=JobType.ENGINEER,
+                model_id="Qwen/Qwen2.5-0.5B-Instruct",
+                output_dir=str(workspace / "list_2"),
+            )
+        )
+
+        # Test GET /api/v1/jobs
+        resp = client.get("/api/v1/jobs?limit=10&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert data["total"] >= 2
+        assert len(data["items"]) >= 2
+        assert data["limit"] == 10
+        assert data["offset"] == 0
+
+        # Filter by job_type
+        resp_filter = client.get("/api/v1/jobs?job_type=ENGINEER")
+        assert resp_filter.status_code == 200
+        data_filter = resp_filter.json()
+        assert all(item["job_type"] == "ENGINEER" for item in data_filter["items"])
+
+    def test_restart_recovery_refined_error_codes(self, temp_env: Any) -> None:
+        client, config, manager, workspace = temp_env
+
+        conn = sqlite3.connect(str(config.db_path))
+        conn.execute(
+            """
+            INSERT INTO jobs (
+                job_id, job_type, model_id, revision, status, domain_status,
+                created_at, started_at, timeout_seconds, output_dir, request_payload
+            ) VALUES ('job_run_1', 'FORGE_BUILD', 'test/m1', 'main', 'RUNNING', NULL,
+                      '2026-09-22T00:00:00Z', '2026-09-22T00:01:00Z', 600, '/tmp/1', '{}')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO jobs (
+                job_id, job_type, model_id, revision, status, domain_status,
+                created_at, started_at, timeout_seconds, output_dir, request_payload
+            ) VALUES ('job_queue_1', 'FORGE_BUILD', 'test/m2', 'main', 'QUEUED', NULL,
+                      '2026-09-22T00:00:00Z', NULL, 600, '/tmp/2', '{}')
+            """
+        )
+        conn.commit()
+
+        # Trigger recovery
+        interrupted = manager.db.mark_interrupted_jobs_as_failed("Maintenance restart")
+        assert "job_run_1" in interrupted
+        assert "job_queue_1" in interrupted
+
+        job_run = manager.get_job("job_run_1")
+        assert job_run is not None
+        assert job_run.status == JobStatus.FAILED
+        assert job_run.error_code == "EXECUTION_INTERRUPTED_BY_RESTART"
+        assert "Working directory may contain partial build artifacts" in (job_run.error_message or "")
+
+        job_queue = manager.get_job("job_queue_1")
+        assert job_queue is not None
+        assert job_queue.status == JobStatus.FAILED
+        assert job_queue.error_code == "QUEUE_DISCARDED_ON_RESTART"

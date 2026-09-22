@@ -29,11 +29,11 @@ def execute_job(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
-) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute a single job with cooperative cancellation and event emissions.
 
     Returns:
-        (job_status, domain_status, output_dir, result_payload, error_message, error_code)
+        (job_status, domain_status, output_dir, result_payload, error_message, error_code, resolved_revision)
     """
     model_id = request_data["model_id"]
     revision = request_data.get("revision")
@@ -44,30 +44,35 @@ def execute_job(
 
     if cancellation_event.is_set():
         emit("CANCELLATION", "CANCELLED", "Job cancelled before execution started", None, None)
-        return (JobStatus.CANCELLED, None, output_dir_str, None, "Job cancelled by user request", "JOB_CANCELLED")
+        return (JobStatus.CANCELLED, None, output_dir_str, None, "Job cancelled by user request", "JOB_CANCELLED", None)
 
     try:
+        res: Any
         if job_type == JobType.FORGE_BUILD:
-            return _execute_forge_build(
+            res = _execute_forge_build(
                 job_id, model_id, revision, target_gpu, request_data, cancellation_event, emit
             )
         elif job_type == JobType.ENGINEER:
-            return _execute_engineer(
+            res = _execute_engineer(
                 job_id, model_id, revision, target_gpu, request_data, cancellation_event, emit
             )
         elif job_type == JobType.OPTIMIZATION:
-            return _execute_optimization(
+            res = _execute_optimization(
                 job_id, model_id, revision, target_gpu, request_data, cancellation_event, emit
             )
         else:
             raise ValueError(f"Unsupported job type: {job_type}")
+
+        if isinstance(res, tuple) and len(res) == 6:
+            return (res[0], res[1], res[2], res[3], res[4], res[5], None)
+        return (res[0], res[1], res[2], res[3], res[4], res[5], res[6])
 
     except Exception as exc:
         logger.exception("Job %s failed with exception", job_id)
         err_msg = str(exc)
         err_code = getattr(exc, "error_code", "INTERNAL_ERROR")
         emit("FAILURE", "FAILED", f"Execution failed: {err_msg}", err_code, None)
-        return (JobStatus.FAILED, None, output_dir_str, None, err_msg, err_code)
+        return (JobStatus.FAILED, None, output_dir_str, None, err_msg, err_code, None)
 
 
 def _execute_forge_build(
@@ -78,7 +83,7 @@ def _execute_forge_build(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
-) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute FORGE_BUILD job."""
     precision = request_data.get("precision") or "fp16"
     allow_full_weights = request_data.get("allow_full_weights", False)
@@ -103,7 +108,7 @@ def _execute_forge_build(
 
     if cancellation_event.is_set():
         emit("CANCELLATION", "CANCELLED", "Job cancelled after planning phase", None, None)
-        return (JobStatus.CANCELLED, None, str(output_dir), None, "Job cancelled by user request", "JOB_CANCELLED")
+        return (JobStatus.CANCELLED, None, str(output_dir), None, "Job cancelled by user request", "JOB_CANCELLED", None)
 
     emit("BUILDING", "RUNNING", f"Executing build steps in {output_dir} (download_weights={allow_full_weights})", None, None)
 
@@ -124,6 +129,7 @@ def _execute_forge_build(
         sanitize_payload(manifest.model_dump(mode="json")),
         None,
         None,
+        manifest.revision,
     )
 
 
@@ -135,10 +141,16 @@ def _execute_engineer(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
-) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute AI Engineer job."""
-    objective_str = request_data.get("objective") or "PREPARE_AMD"
-    objective = EngineerObjective(objective_str)
+    objective_str = (request_data.get("objective") or "BASE_PREPARATION").strip().upper()
+    if objective_str in ("PREPARE_AMD", "BASE", "PREPARE"):
+        objective = EngineerObjective.BASE_PREPARATION
+    else:
+        try:
+            objective = EngineerObjective(objective_str)
+        except ValueError:
+            objective = EngineerObjective.BASE_PREPARATION
     allow_full_weights = request_data.get("allow_full_weights", False)
     max_attempts = request_data.get("max_attempts") or 5
     max_minutes = (request_data.get("timeout_seconds") or 600) // 60
@@ -166,13 +178,15 @@ def _execute_engineer(
 
     if cancellation_event.is_set():
         emit("CANCELLATION", "CANCELLED", "Job cancelled before agent loop", None, None)
-        return (JobStatus.CANCELLED, None, str(output_dir), None, "Job cancelled by user request", "JOB_CANCELLED")
+        return (JobStatus.CANCELLED, None, str(output_dir), None, "Job cancelled by user request", "JOB_CANCELLED", None)
 
     agent = AIEngineer()
     report = agent.run(request)
 
     domain_status = report.status.value
     emit("FINALIZING", "SUCCESS", f"AI Engineer completed with status {domain_status}", None, {"report": report.model_dump(mode="json")})
+
+    resolved_revision = report.revision
 
     return (
         JobStatus.SUCCEEDED,
@@ -181,6 +195,7 @@ def _execute_engineer(
         sanitize_payload(report.model_dump(mode="json")),
         None,
         None,
+        resolved_revision,
     )
 
 
@@ -192,7 +207,7 @@ def _execute_optimization(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
-) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute Optimization Engine job."""
     objective_str = request_data.get("objective") or "MAX_THROUGHPUT"
     strategies_input = request_data.get("strategies")
@@ -222,7 +237,7 @@ def _execute_optimization(
 
     if cancellation_event.is_set():
         emit("CANCELLATION", "CANCELLED", "Job cancelled before optimization pipeline", None, None)
-        return (JobStatus.CANCELLED, None, output_dir_str, None, "Job cancelled by user request", "JOB_CANCELLED")
+        return (JobStatus.CANCELLED, None, output_dir_str, None, "Job cancelled by user request", "JOB_CANCELLED", None)
 
     executor = OptimizationExecutor()
     report = executor.execute(request)
@@ -231,6 +246,8 @@ def _execute_optimization(
     domain_status = report.baseline.status.value if report.baseline else "CONFIG_ONLY"
     emit("FINALIZING", "SUCCESS", f"Optimization completed with {len(report.candidates)} candidates", None, {"report": report.model_dump(mode="json")})
 
+    resolved_revision = report.revision
+
     return (
         JobStatus.SUCCEEDED,
         domain_status,
@@ -238,4 +255,5 @@ def _execute_optimization(
         sanitize_payload(report.model_dump(mode="json")),
         None,
         None,
+        resolved_revision,
     )

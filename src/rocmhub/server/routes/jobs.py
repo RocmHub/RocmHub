@@ -12,11 +12,28 @@ from rocmhub.server.events import sse_event_stream
 from rocmhub.server.orchestrator.manager import JobManager
 from rocmhub.server.orchestrator.models import (
     JobCreateRequest,
+    JobListResponse,
     JobResponse,
     JobResultResponse,
+    JobStatus,
+    JobType,
 )
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
+
+
+@router.get("", response_model=JobListResponse)
+async def list_jobs(
+    req: Request,
+    limit: int = Query(default=20, ge=1, le=100, description="Page limit"),
+    offset: int = Query(default=0, ge=0, description="Page offset"),
+    status: Optional[JobStatus] = Query(default=None, description="Filter by status"),
+    job_type: Optional[JobType] = Query(default=None, description="Filter by job type"),
+) -> JobListResponse:
+    """List jobs with pagination and filtering, newest first."""
+    manager: JobManager = req.app.state.job_manager
+    items, total = manager.list_jobs(limit=limit, offset=offset, status=status, job_type=job_type)
+    return JobListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)

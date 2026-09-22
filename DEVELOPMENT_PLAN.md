@@ -374,7 +374,32 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - `rocmhub serve [--host 127.0.0.1] [--port 8000] [--db-path PATH]`
 - **Verification**: 345 unit tests (18 new Phase 13 tests) + 10 live integration tests passing. Ruff clean. Mypy clean (82 files). Real local HTTP smoke test on `127.0.0.1:8765` for `Qwen/Qwen2.5-0.5B-Instruct` verified (SSE events streamed, terminal status `SUCCEEDED`, domain status `CONFIG_ONLY`, zero synthetic metrics).
 
-### Phase 14: Verified Gate & Registry Preparation (PLANNED)
+### Phase 14: Frontend MVP & API Audit Fixes (COMPLETED)
+- [x] Complete backend audit & critical integrity fixes:
+  - Commit SHA resolution and persistence in SQLite (`revision` column updated from resolved Forge/Engineer/Optimization manifests).
+  - Runtime recipe naming truthfulness (`pytorch_transformers_hip` accurately reflected; no synthetic vLLM claims).
+  - Hardware telemetry integrity: Apple Silicon/macOS Darwin host memory strictly decoupled from AMD ROCm GPU VRAM; `rocm_available: false` and explanatory warnings served.
+  - Crash recovery error code distinction: `EXECUTION_INTERRUPTED_BY_RESTART` for running jobs vs `QUEUE_DISCARDED_ON_RESTART` for queued jobs.
+  - Implemented `GET /api/v1/jobs` pagination (`limit`, `offset`) and filtering (`status`, `job_type`).
+- [x] Implement modern responsive Frontend Web Application (`frontend/`):
+  - Architecture: React 18, TypeScript, Vite, Tailwind CSS, TanStack Query, Lucide icons.
+  - Palette: Dark industrial theme (`#101014` bg, `#19191F` card, `#222229` elevated, `#ED1C24` primary accent).
+  - SSE streaming client (`sse.ts`) with automatic reconnect, resume via `from_event_id`, deduplication, and resource cleanup.
+  - Semantic status display: explicit domain statuses (`CONFIG_ONLY`, `PREPARED`, `EXECUTED`, `NOT_MEASURED`) separated from HTTP job statuses (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`).
+  - 5 interactive views:
+    - **Dashboard**: Hardware health telemetry, ROCm availability banner, active and historical jobs table with auto-refresh.
+    - **Model Explorer**: Hugging Face metadata inspector, commit SHA, architecture, parameters, license, compatibility verdict.
+    - **Forge Studio**: Target GPU and precision selection, deterministic build plan inspection, build runner with real-time SSE log viewer and verified artifact digest.
+    - **AI Engineer**: Autonomous loop launcher (`BASE_PREPARATION`), budget configuration, live trajectory viewer, cancellation support, executive summary report.
+    - **Optimization Lab**: Multi-strategy candidate comparison table, baseline metrics, clear `NOT_MEASURED` tagging on non-ROCm hosts without synthetic numbers.
+- **Verification**:
+  - Python test suite: 347 unit tests passed (`pytest tests/test_api.py -v` 20/20 passed).
+  - Frontend test suite: 12 Vitest tests passed (`npm test`).
+  - Production build: `tsc && vite build` built in 1.25s with 0 errors.
+  - Code hygiene: `ruff check` and `mypy` clean (82 source files).
+  - Live Demo Smoke Test: `scripts/live_demo_smoke.py` end-to-end 10-step automated verification on `Qwen/Qwen2.5-0.5B-Instruct` passed completely.
+
+### Phase 15: Verified Gate & Registry Preparation (PLANNED)
 - [ ] Implement `Verified` certification criteria (PASS correctness, QRR quality gate, Benchmark Guard reproducibility PASS).
 - [ ] Local and remote registry packaging.
 - **Verification**: End-to-end certification workflow test.

@@ -6,9 +6,15 @@ ROCmHub is an open-source platform designed to automate the preparation, optimiz
 
 ---
 
-## Current Status: Phase 1 (Foundation & Core Contracts)
+## Current Status: Phase 14 (Frontend MVP & Backend Orchestration Complete)
 
-ROCmHub is currently in active development. Phase 1 defines the core domain types, execution statuses, data contracts, and reproducible artifact manifest schemas.
+ROCmHub features a complete platform stack:
+- **Core Domain Engine**: Model acquisition, static inspection, hardware detection, Benchmark Guard, and reproducible artifact builder.
+- **Model Forge**: Automated preparation and reproducible recipe generation for open causal language models (`pytorch_transformers_hip`).
+- **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery.
+- **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines.
+- **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, and crash recovery.
+- **Frontend MVP**: Responsive React 18 / TypeScript / Vite / Tailwind CSS web application with live SSE logs, telemetry dashboard, model explorer, forge studio, AI engineer workspace, and optimization lab.
 
 For architectural decisions, principles, and roadmap, see:
 - [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -29,10 +35,11 @@ For architectural decisions, principles, and roadmap, see:
 
 ### Prerequisites
 - Python 3.9+
+- Node.js 18+ and npm
 - Linux with ROCm 6.0+ and AMD GPU (for native inference benchmarking)
 - macOS / Windows / Linux (for development, schema validation, and diagnostic mode)
 
-### Setup Virtual Environment
+### Backend Setup
 
 ```bash
 python3 -m venv .venv
@@ -40,26 +47,71 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### Running Tests
+### Frontend Setup
 
 ```bash
-pytest
+cd frontend
+npm install
 ```
 
-### CLI Usage
+### Running the Web Platform
+
+Start the backend API server:
+```bash
+rocmhub serve --host 127.0.0.1 --port 8000
+```
+
+In a separate terminal, launch the frontend development server:
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser to access the ROCmHub workspace.
+
+---
+
+## Running Tests
+
+### Backend Tests & Verification
+```bash
+# Run all unit tests
+pytest
+
+# Linting and Type Checking
+ruff check src tests
+mypy src tests/test_api.py
+
+# End-to-end integration smoke test
+python3 scripts/live_demo_smoke.py
+```
+
+### Frontend Tests & Build
+```bash
+cd frontend
+npm test
+npm run build
+```
+
+---
+
+## CLI Usage
 
 ```bash
 # Display version
 rocmhub --version
 
-# Show environment (Phase 3)
+# Show environment
 rocmhub env
 
-# Inspect model (Phase 4)
+# Inspect model metadata
 rocmhub inspect Qwen/Qwen2.5-0.5B-Instruct
 
-# Run benchmark pipeline (Phase 5-8)
+# Run benchmark pipeline
 rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
+
+# Start local API server
+rocmhub serve --host 127.0.0.1 --port 8000
 ```
 
 ---

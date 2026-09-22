@@ -7,7 +7,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from rocmhub.server.orchestrator.migrations import apply_migrations
 from rocmhub.server.orchestrator.models import JobEvent, JobResponse, JobStatus, JobType
@@ -160,6 +160,7 @@ class DatabaseManager:
         result_payload: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
         error_code: Optional[str] = None,
+        revision: Optional[str] = None,
     ) -> None:
         """Update job lifecycle status and optional payloads."""
         with self._lock:
@@ -190,6 +191,9 @@ class DatabaseManager:
                 if error_code is not None:
                     updates.append("error_code = ?")
                     params.append(error_code)
+                if revision is not None:
+                    updates.append("revision = ?")
+                    params.append(revision)
 
                 params.append(job_id)
                 query = f"UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?"
@@ -281,26 +285,37 @@ class DatabaseManager:
                 conn.close()
 
     def mark_interrupted_jobs_as_failed(self, reason: str) -> List[str]:
-        """Mark any RUNNING or QUEUED jobs on server restart as FAILED."""
+        """Mark any RUNNING or QUEUED jobs on server restart as FAILED with explicit error codes."""
         with self._lock:
             conn = self._get_connection()
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT job_id FROM jobs WHERE status IN (?, ?)",
+                    "SELECT job_id, status FROM jobs WHERE status IN (?, ?)",
                     (JobStatus.QUEUED.value, JobStatus.RUNNING.value),
                 )
-                interrupted_ids = [row[0] for row in cursor.fetchall()]
+                interrupted_rows = cursor.fetchall()
+                interrupted_ids = [row[0] for row in interrupted_rows]
                 now_iso = datetime.now(timezone.utc).isoformat()
 
-                for jid in interrupted_ids:
+                for jid, st in interrupted_rows:
+                    if st == JobStatus.RUNNING.value:
+                        err_code = "EXECUTION_INTERRUPTED_BY_RESTART"
+                        err_msg = (
+                            f"Job execution was interrupted by server restart: {reason}. "
+                            "Working directory may contain partial build artifacts."
+                        )
+                    else:
+                        err_code = "QUEUE_DISCARDED_ON_RESTART"
+                        err_msg = f"Job was queued but not started before server restart: {reason}."
+
                     cursor.execute(
                         """
                         UPDATE jobs
                         SET status = ?, completed_at = ?, error_message = ?, error_code = ?
                         WHERE job_id = ?
                         """,
-                        (JobStatus.FAILED.value, now_iso, reason, "SERVER_RESTART", jid),
+                        (JobStatus.FAILED.value, now_iso, err_msg, err_code, jid),
                     )
                     # Insert failure event
                     cursor.execute(
@@ -314,10 +329,69 @@ class DatabaseManager:
                             job_id, sequence, timestamp, phase, status, message, error_code
                         ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (jid, seq, now_iso, "SYSTEM", "FAILED", reason, "SERVER_RESTART"),
+                        (jid, seq, now_iso, "SYSTEM", "FAILED", err_msg, err_code),
                     )
 
                 conn.commit()
                 return interrupted_ids
+            finally:
+                conn.close()
+
+    def list_jobs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        status: Optional[JobStatus] = None,
+        job_type: Optional[JobType] = None,
+    ) -> Tuple[List[JobResponse], int]:
+        """List jobs with pagination, filtering, and newest first."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                where_clauses: List[str] = []
+                params: List[Any] = []
+
+                if status is not None:
+                    where_clauses.append("status = ?")
+                    params.append(status.value)
+                if job_type is not None:
+                    where_clauses.append("job_type = ?")
+                    params.append(job_type.value)
+
+                where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+                # Count total matching rows
+                count_query = f"SELECT COUNT(*) FROM jobs {where_sql}"
+                cursor.execute(count_query, params)
+                total = cursor.fetchone()[0]
+
+                # Select paginated results
+                select_query = (
+                    f"SELECT * FROM jobs {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                )
+                cursor.execute(select_query, params + [limit, offset])
+                rows = cursor.fetchall()
+
+                jobs: List[JobResponse] = []
+                for row in rows:
+                    jobs.append(
+                        JobResponse(
+                            job_id=row["job_id"],
+                            job_type=JobType(row["job_type"]),
+                            model_id=row["model_id"],
+                            revision=row["revision"],
+                            status=JobStatus(row["status"]),
+                            domain_status=row["domain_status"],
+                            created_at=row["created_at"],
+                            started_at=row["started_at"],
+                            completed_at=row["completed_at"],
+                            timeout_seconds=row["timeout_seconds"],
+                            output_dir=row["output_dir"],
+                            error_message=row["error_message"],
+                            error_code=row["error_code"],
+                        )
+                    )
+                return jobs, total
             finally:
                 conn.close()

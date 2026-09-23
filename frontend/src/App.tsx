@@ -8,6 +8,7 @@ import { ModelExplorerView } from './components/explorer/ModelExplorerView';
 import { ForgeStudioView } from './components/forge/ForgeStudioView';
 import { AIEngineerView } from './components/engineer/AIEngineerView';
 import { OptimizationLabView } from './components/optimization/OptimizationLabView';
+import { ToastProvider } from './components/common/Toast';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'forge', 'engineer', 'optimization'];
 
@@ -31,7 +32,6 @@ export const App: React.FC = () => {
   });
   const [selectedJobId, setSelectedJobId] = useState<string | null>(getInitialJobId);
 
-  // Sync activeTab with URL hash
   const switchTab = (tab: NavTab) => {
     setActiveTab(tab);
     if (typeof window !== 'undefined' && window.location.hash !== `#${tab}`) {
@@ -50,7 +50,6 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Poll system health
   const {
     data: health,
     isLoading: isLoadingHealth,
@@ -61,7 +60,6 @@ export const App: React.FC = () => {
     refetchInterval: 10000,
   });
 
-  // Poll jobs history
   const {
     data: jobsList,
     isLoading: isLoadingJobs,
@@ -79,7 +77,6 @@ export const App: React.FC = () => {
 
   const handleSelectJob = (jobId: string) => {
     setSelectedJobId(jobId);
-    // Find job type to navigate to the respective studio tab
     const job = jobsList?.items.find((j) => j.job_id === jobId);
     if (job?.job_type === 'ENGINEER') {
       switchTab('engineer');
@@ -96,70 +93,66 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-content-primary flex flex-col">
-      {/* Top Navigation */}
-      <Navbar
-        health={health ?? null}
-        isLoading={isLoadingHealth}
-        isError={isHealthError}
-        isMobileMenuOpen={isMobileMenuOpen}
-        onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
-      />
-
-      {/* Main Content Layout */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Left Sidebar */}
-        <Sidebar
-          activeTab={activeTab}
-          onTabChange={switchTab}
-          isOpenMobile={isMobileMenuOpen}
-          onCloseMobile={() => setIsMobileMenuOpen(false)}
+    <ToastProvider>
+      <div className="min-h-screen bg-background text-content-primary flex flex-col">
+        <Navbar
+          health={health ?? null}
+          isLoading={isLoadingHealth}
+          isError={isHealthError}
+          isMobileMenuOpen={isMobileMenuOpen}
+          onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         />
 
-        {/* View Container */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-background">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              health={health ?? null}
-              jobsList={jobsList ?? null}
-              isLoadingJobs={isLoadingJobs}
-              onNavigate={switchTab}
-              onSelectJob={handleSelectJob}
-            />
-          )}
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar
+            activeTab={activeTab}
+            onTabChange={switchTab}
+            isOpenMobile={isMobileMenuOpen}
+            onCloseMobile={() => setIsMobileMenuOpen(false)}
+          />
 
-          {activeTab === 'explorer' && (
-            <ModelExplorerView
-              onSelectModelForForge={handleSelectModelForForge}
-              onNavigate={switchTab}
-            />
-          )}
-
-          {activeTab === 'forge' && (
-            <ForgeStudioView
-              initialModelId={selectedModelForForge.modelId}
-              initialRevision={selectedModelForForge.revision}
-              selectedJobId={selectedJobId}
-              onJobCreated={handleJobCreated}
-            />
-          )}
-
-          {activeTab === 'engineer' && (
-            <AIEngineerView
-              selectedJobId={selectedJobId}
-              onJobCreated={handleJobCreated}
-            />
-          )}
-
-          {activeTab === 'optimization' && (
-            <OptimizationLabView
-              selectedJobId={selectedJobId}
-              onJobCreated={handleJobCreated}
-            />
-          )}
-        </main>
+          {/* Main content — full remaining width, each view manages its own max-width */}
+          <main className="flex-1 overflow-y-auto bg-background">
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                health={health ?? null}
+                jobsList={jobsList ?? null}
+                isLoadingJobs={isLoadingJobs}
+                onNavigate={switchTab}
+                onSelectJob={handleSelectJob}
+              />
+            )}
+            {activeTab === 'explorer' && (
+              <ModelExplorerView
+                onSelectModelForForge={handleSelectModelForForge}
+                onNavigate={switchTab}
+              />
+            )}
+            {activeTab === 'forge' && (
+              <ForgeStudioView
+                initialModelId={selectedModelForForge.modelId}
+                initialRevision={selectedModelForForge.revision}
+                selectedJobId={selectedJobId}
+                onJobCreated={handleJobCreated}
+              />
+            )}
+            {activeTab === 'engineer' && (
+              <AIEngineerView
+                selectedJobId={selectedJobId}
+                onJobCreated={handleJobCreated}
+              />
+            )}
+            {activeTab === 'optimization' && (
+              <OptimizationLabView
+                selectedJobId={selectedJobId}
+                onJobCreated={handleJobCreated}
+              />
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 };
+
 export default App;

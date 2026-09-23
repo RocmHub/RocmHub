@@ -5,7 +5,11 @@ import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
-import { Bot, Play, XCircle, CheckCircle2, Clock, RotateCcw, AlertCircle, Sparkles, Cpu, Target, Shield, Check } from 'lucide-react';
+import { useToast } from '../common/Toast';
+import {
+  BrainCircuit, Play, XCircle, CheckCircle2, Clock, RotateCcw,
+  AlertCircle, ChevronDown, ChevronUp,
+} from 'lucide-react';
 
 import aiEngineerHeroImg from '../../assets/visuals/ai_engineer_hero.svg';
 
@@ -14,19 +18,60 @@ interface AIEngineerViewProps {
   onJobCreated?: (jobId: string) => void;
 }
 
+const OBJECTIVES = [
+  {
+    id: 'BASE_PREPARATION',
+    label: 'Base Preparation',
+    desc: 'Verify runtime compatibility and validate model configuration',
+    icon: '◈',
+  },
+  {
+    id: 'MAX_THROUGHPUT',
+    label: 'Max Throughput',
+    desc: 'Optimize for highest generation tokens per second',
+    icon: '⚡',
+  },
+  {
+    id: 'MIN_LATENCY',
+    label: 'Min Latency',
+    desc: 'Minimize time-to-first-token for responsive inference',
+    icon: '◎',
+  },
+  {
+    id: 'FULL_PREPARATION',
+    label: 'Full Preparation',
+    desc: 'Complete weight materialization when hardware is confirmed',
+    icon: '▣',
+  },
+];
+
+// Map backend phase labels to product-level descriptions
+const PHASE_LABELS: Record<string, string> = {
+  PREFLIGHT: 'Inspecting model',
+  ENVIRONMENT_CHECK: 'Checking environment',
+  PLANNING: 'Planning session',
+  FORGE: 'Preparing configuration',
+  VALIDATION: 'Evaluating result',
+  COMPLETED: 'Session complete',
+  RECOMMENDATION: 'Generating recommendations',
+  ERROR: 'Handling error',
+};
+
 export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, onJobCreated }) => {
+  const toast = useToast();
+
   const [modelId, setModelId] = useState('Qwen/Qwen2.5-0.5B-Instruct');
   const [objective, setObjective] = useState('BASE_PREPARATION');
   const [maxAttempts, setMaxAttempts] = useState(5);
   const [timeoutMinutes, setTimeoutMinutes] = useState(10);
   const [maxDiskGb, setMaxDiskGb] = useState(10);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [activeJob, setActiveJob] = useState<JobResponse | null>(null);
   const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
-  // Load existing selected job if requested from Dashboard
   useEffect(() => {
     if (!selectedJobId) return;
     let unsubscribe: (() => void) | null = null;
@@ -56,9 +101,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                     .then((res) => {
                       if (!isCancelled) {
                         setJobResult(res);
-                        setActiveJob((prev) =>
-                          prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
-                        );
+                        setActiveJob((prev) => prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev);
                       }
                     })
                     .catch(() => {});
@@ -69,9 +112,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               try {
                 const res = await fetchJobResult(selectedJobId!);
                 if (!isCancelled) setJobResult(res);
-              } catch (e) {
-                console.warn(e);
-              }
+              } catch (e) { console.warn(e); }
             },
           });
         }
@@ -81,10 +122,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
     }
 
     loadSelectedJob();
-    return () => {
-      isCancelled = true;
-      if (unsubscribe) unsubscribe();
-    };
+    return () => { isCancelled = true; if (unsubscribe) unsubscribe(); };
   }, [selectedJobId]);
 
   const handleLaunch = async () => {
@@ -117,9 +155,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             fetchJobResult(job.job_id)
               .then((res) => {
                 setJobResult(res);
-                setActiveJob((prev) =>
-                  prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev
-                );
+                setActiveJob((prev) => prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev);
               })
               .catch(() => {});
           }
@@ -128,22 +164,12 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
           try {
             const res = await fetchJobResult(job.job_id);
             setJobResult(res);
-            setActiveJob((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    status: res.job_status,
-                    domain_status: res.domain_status,
-                  }
-                : prev
-            );
-          } catch (e) {
-            console.warn('Failed to fetch engineer job result:', e);
-          }
+            setActiveJob((prev) => prev ? { ...prev, status: res.job_status, domain_status: res.domain_status } : prev);
+          } catch (e) { console.warn('Failed to fetch engineer job result:', e); }
         },
       });
     } catch (err: any) {
-      alert(`Launch failed: ${err.message}`);
+      toast.error(`Session launch failed: ${err.message}`);
     } finally {
       setIsStarting(false);
     }
@@ -155,49 +181,40 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
       await cancelJob(activeJob.job_id);
       setActiveJob((prev) => (prev ? { ...prev, status: 'CANCELLED' } : prev));
     } catch (e: any) {
-      alert(`Cancel failed: ${e.message}`);
+      toast.error(`Cancel failed: ${e.message}`);
     }
   };
 
-  const OBJECTIVES = [
-    { id: 'BASE_PREPARATION', label: 'Base Preparation', desc: 'Baseline runtime & metadata verification' },
-    { id: 'MAX_THROUGHPUT', label: 'Max Throughput', desc: 'Optimize generation tokens per second' },
-    { id: 'MIN_LATENCY', label: 'Min Latency', desc: 'Minimize time-to-first-token (TTFT)' },
-    { id: 'FULL_PREPARATION', label: 'Full Preparation', desc: 'Prepare weights when hardware confirmed' },
-  ];
+  const isRunning = activeJob?.status === 'RUNNING' || activeJob?.status === 'QUEUED';
+  const selectedObj = OBJECTIVES.find(o => o.id === objective);
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      {/* Visual Header Banner */}
-      <div className="relative rounded-xl overflow-hidden border border-surface-border bg-surface shadow-xl">
+    <div className="page-fade">
+      {/* ── HERO ─────────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden border-b border-surface-border">
         <div
-          className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-luminosity"
-          style={{ backgroundImage: `url(${aiEngineerHeroImg})` }}
-        />
+          className="absolute inset-0 flex items-center justify-end opacity-25 pointer-events-none"
+          style={{ overflow: 'hidden' }}
+        >
+          <img src={aiEngineerHeroImg} alt="" className="h-full max-h-[200px] mr-12 opacity-80" />
+        </div>
         <div className="absolute inset-0 hero-overlay" />
-
-        <div className="relative p-6 space-y-2">
-          <div className="inline-flex items-center space-x-2 px-2.5 py-1 rounded-full bg-accent-red/10 border border-accent-red/30 text-[11px] font-mono text-red-400">
-            <Bot className="w-3.5 h-3.5 text-accent-red" />
-            <span>Autonomous Closed-Loop Optimization</span>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Autonomous AI Engineer</h1>
-          <p className="text-xs text-zinc-300 max-w-2xl font-sans leading-relaxed">
-            Specialized agent executing iterative model preparation loops, diagnostics, and build repairs.
+        <div className="relative z-10 px-8 sm:px-10 py-8">
+          <p className="text-xs font-mono font-medium text-violet-400/90 uppercase tracking-wider mb-1.5">
+            Autonomous Preparation
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-white mb-1">AI Engineer</h1>
+          <p className="text-sm text-content-secondary">
+            Autonomous model preparation for AMD hardware.
           </p>
         </div>
       </div>
 
-      {/* Task Creation Form */}
-      <div className="p-6 rounded-xl bg-surface border border-surface-border shadow-sm space-y-5">
-        <h2 className="text-sm font-semibold text-content-primary flex items-center space-x-2">
-          <Target className="w-4 h-4 text-accent-red" />
-          <span>Engineer Session Configuration</span>
-        </h2>
-
+      <div className="px-8 sm:px-10 py-7 space-y-6 max-w-5xl">
+        {/* ── OBJECTIVE SELECTION ──────────────────────────────────── */}
         <div className="space-y-3">
-          <label className="text-xs font-mono text-content-secondary">Optimization Objective</label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <h2 className="text-sm font-semibold text-content-primary">What's your goal?</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {OBJECTIVES.map((obj) => {
               const isSelected = objective === obj.id;
               return (
@@ -205,254 +222,289 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   key={obj.id}
                   type="button"
                   onClick={() => setObjective(obj.id)}
-                  className={`p-3 rounded-lg border text-left transition-all font-mono ${
+                  className={`p-4 rounded-xl border text-left transition-all ${
                     isSelected
-                      ? 'bg-accent-red/10 border-accent-red text-white shadow-sm'
-                      : 'bg-surface-elevated/70 border-surface-border text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                      ? 'bg-violet-500/10 border-violet-500/40 shadow-sm'
+                      : 'card hover:border-zinc-600 hover:bg-surface-elevated'
                   }`}
                 >
-                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                    <span>{obj.label}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-accent-red" />}
+                  <div className={`text-lg mb-2 ${isSelected ? 'text-violet-400' : 'text-content-muted'}`}>
+                    <BrainCircuit className="w-5 h-5" />
                   </div>
-                  <div className="text-[10px] text-zinc-500 font-sans leading-tight">{obj.desc}</div>
+                  <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-content-primary' : 'text-content-secondary'}`}>
+                    {obj.label}
+                  </div>
+                  <p className="text-[11px] text-content-muted leading-relaxed">{obj.desc}</p>
+                  {isSelected && (
+                    <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-violet-500/50 to-transparent rounded" />
+                  )}
                 </button>
               );
             })}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          <div className="space-y-1.5">
-            <label className="text-xs font-mono text-content-secondary">Target Model ID</label>
-            <input
-              type="text"
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              className="w-full bg-background border border-surface-border rounded-lg px-3.5 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red focus:ring-1 focus:ring-accent-red transition-all"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-2.5">
+        {/* ── MODEL + LAUNCH ──────────────────────────────────────── */}
+        <div className="card p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div className="space-y-1.5">
-              <label className="text-xs font-mono text-content-secondary">Max Attempts</label>
+              <label className="text-xs font-medium text-content-muted">Model ID</label>
               <input
-                type="number"
-                min={1}
-                max={10}
-                value={maxAttempts}
-                onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 5)}
-                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
+                type="text"
+                value={modelId}
+                onChange={(e) => setModelId(e.target.value)}
+                className="input-field font-mono text-xs"
+                placeholder="org/model-name"
               />
             </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-content-secondary">Timeout (m)</label>
-              <input
-                type="number"
-                min={1}
-                max={60}
-                value={timeoutMinutes}
-                onChange={(e) => setTimeoutMinutes(parseInt(e.target.value) || 10)}
-                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-content-secondary">Disk (GB)</label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={maxDiskGb}
-                onChange={(e) => setMaxDiskGb(parseInt(e.target.value) || 10)}
-                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-surface-border">
-          <div className="flex items-center space-x-2 text-[11px] font-mono text-zinc-500">
-            <Shield className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Guards: Isolated workspace, step quotas, fail-closed preflight.</span>
-          </div>
-          <button
-            onClick={handleLaunch}
-            disabled={isStarting || activeJob?.status === 'RUNNING'}
-            className="flex items-center space-x-2 px-5 py-2.5 rounded-lg bg-accent-red hover:bg-accent-red-hover text-white text-xs font-semibold transition-all disabled:opacity-50 shadow-md shadow-red-950/40 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isStarting ? 'Launching Agent...' : 'Launch AI Engineer Session'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Active Session & Actions View */}
-      {activeJob && (
-        <div className="p-6 rounded-xl bg-surface border border-surface-border shadow-lg space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h3 className="text-sm font-semibold text-content-primary">Agent Action Progress</h3>
-              <span className="text-xs font-mono text-zinc-400 bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
-                {activeJob.job_id}
-              </span>
-              <StatusBadge status={activeJob.status} />
-              <DomainStatusTag status={activeJob.domain_status} />
-            </div>
-
-            {(activeJob.status === 'RUNNING' || activeJob.status === 'QUEUED') && (
+            <div className="flex items-end gap-3">
               <button
-                onClick={handleCancel}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors border border-zinc-700"
+                onClick={handleLaunch}
+                disabled={isStarting || isRunning}
+                className="btn-primary flex-1"
               >
-                <XCircle className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Cancel Execution</span>
+                {isStarting ? (
+                  <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Launching...</>
+                ) : (
+                  <><Play className="w-4 h-4 fill-current" />Start Session</>
+                )}
               </button>
+            </div>
+          </div>
+
+          {/* Advanced toggle */}
+          <div className="pt-2 border-t border-surface-border">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(v => !v)}
+              className="flex items-center gap-1.5 text-xs text-content-muted hover:text-content-secondary transition-colors"
+            >
+              {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              Advanced Settings
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-content-muted">Max Attempts</label>
+                  <input
+                    type="number" min={1} max={10} value={maxAttempts}
+                    onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 5)}
+                    className="input-field text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-content-muted">Timeout (min)</label>
+                  <input
+                    type="number" min={1} max={60} value={timeoutMinutes}
+                    onChange={(e) => setTimeoutMinutes(parseInt(e.target.value) || 10)}
+                    className="input-field text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-content-muted">Disk Limit (GB)</label>
+                  <input
+                    type="number" min={1} max={100} value={maxDiskGb}
+                    onChange={(e) => setMaxDiskGb(parseInt(e.target.value) || 10)}
+                    className="input-field text-xs font-mono"
+                  />
+                </div>
+              </div>
             )}
           </div>
+        </div>
 
-          {/* Structured Actions Stream */}
-          <LogViewer events={jobEvents} />
-
-          {/* Final Agent Report */}
-          {jobResult && (
-            <div className="p-5 rounded-xl bg-[#121216] border border-surface-border space-y-4 text-xs font-mono">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
-                <span className="font-semibold text-emerald-400 flex items-center space-x-1.5 text-sm">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Agent Session Finished — Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}</span>
-                </span>
-                <span className="text-zinc-500 text-[11px]">
-                  {jobResult.completed_at ? new Date(jobResult.completed_at).toLocaleTimeString() : ''}
-                </span>
+        {/* ── ACTIVE SESSION ──────────────────────────────────────── */}
+        {activeJob && (
+          <div className="space-y-4">
+            {/* Session header */}
+            <div className="card p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-content-primary">Session in Progress</h3>
+                  <span className="text-[11px] font-mono text-content-muted bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
+                    {activeJob.job_id}
+                  </span>
+                  <StatusBadge status={activeJob.status} />
+                  <DomainStatusTag status={activeJob.domain_status} />
+                </div>
+                {isRunning && (
+                  <button onClick={handleCancel} className="btn-danger shrink-0">
+                    <XCircle className="w-3.5 h-3.5" />
+                    Cancel
+                  </button>
+                )}
               </div>
 
-              {/* Report Metrics Bar */}
-              {jobResult.result && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
-                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
-                      <Clock className="w-3 h-3" />
-                      <span>Duration</span>
-                    </div>
-                    <div className="text-zinc-200 font-bold text-sm">
-                      {jobResult.result.total_duration_seconds !== undefined
-                        ? `${Number(jobResult.result.total_duration_seconds).toFixed(2)}s`
-                        : 'N/A'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
-                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Attempts</span>
-                    </div>
-                    <div className="text-zinc-200 font-bold text-sm">
-                      {jobResult.result.attempts_used !== undefined
-                        ? `${jobResult.result.attempts_used}`
-                        : 'N/A'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
-                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
-                      <Cpu className="w-3 h-3" />
-                      <span>Target GPU</span>
-                    </div>
-                    <div className="text-zinc-200 font-bold text-sm truncate">
-                      {jobResult.result.target_gpu || 'Auto / None'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
-                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
-                      <Sparkles className="w-3 h-3 text-emerald-400" />
-                      <span>Build Status</span>
-                    </div>
-                    <div className="text-emerald-400 font-bold text-sm">
-                      {jobResult.result.build_manifest?.status || 'CONFIG_ONLY'}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Executive Reasons List */}
-              {jobResult.result?.reasons && Array.isArray(jobResult.result.reasons) && jobResult.result.reasons.length > 0 && (
-                <div className="p-4 rounded-lg bg-surface border border-surface-border space-y-2">
-                  <div className="text-zinc-400 text-[11px] uppercase font-semibold">Decision Rationale &amp; Executive Summary</div>
-                  <ul className="space-y-1.5 text-zinc-300">
-                    {jobResult.result.reasons.map((reason: string, idx: number) => (
-                      <li key={idx} className="flex items-start space-x-2">
-                        <span className="text-accent-red font-bold">›</span>
-                        <span className="leading-relaxed">{reason}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Errors Handled */}
-              {jobResult.result?.errors_encountered && Array.isArray(jobResult.result.errors_encountered) && jobResult.result.errors_encountered.length > 0 && (
-                <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-2 text-amber-300">
-                  <div className="text-amber-400 text-[11px] uppercase font-semibold flex items-center space-x-1.5">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Diagnostics &amp; Handled Warnings:</span>
-                  </div>
-                  <ul className="space-y-1 text-[11px]">
-                    {jobResult.result.errors_encountered.map((err: string, idx: number) => (
-                      <li key={idx} className="flex items-start space-x-2">
-                        <span>•</span>
-                        <span>{err}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Action Trajectory Trace */}
-              {jobResult.result?.trajectory && Array.isArray(jobResult.result.trajectory) && jobResult.result.trajectory.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-surface-border">
-                  <div className="text-zinc-400 uppercase text-[11px] font-semibold">Agent Action Trajectory ({jobResult.result.trajectory.length} steps):</div>
-                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {jobResult.result.trajectory.map((step: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className="p-3 rounded-lg bg-surface border border-surface-border text-xs space-y-1.5 shadow-sm"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <span className="px-1.5 py-0.5 rounded bg-black/50 text-zinc-400 text-[10px] font-mono border border-zinc-800">
-                              Step {step.step_index ?? idx + 1}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-accent-red/15 text-red-400 text-[10px] font-mono border border-accent-red/20 font-semibold">
-                              {step.phase}
-                            </span>
-                            <span className="font-semibold text-zinc-200">{step.action}</span>
-                          </div>
-                          {step.duration_seconds !== undefined && (
-                            <span className="text-zinc-500 text-[11px]">{Number(step.duration_seconds).toFixed(2)}s</span>
-                          )}
-                        </div>
-                        {step.observation && (
-                          <div className="text-zinc-300 text-[11px] pl-2.5 border-l-2 border-zinc-700 font-sans">
-                            {step.observation}
-                          </div>
-                        )}
-                        {step.rationale && (
-                          <div className="text-zinc-500 text-[10px] pl-2.5 italic">
-                            Thought: {step.rationale}
-                          </div>
-                        )}
+              {/* Agent activity — product-level view of events */}
+              {jobEvents.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-xs text-content-muted font-medium mb-2">Agent Activity</div>
+                  {jobEvents.slice(-6).map((evt) => (
+                    <div
+                      key={evt.event_id || evt.sequence}
+                      className="flex items-start gap-2.5 text-xs py-1.5"
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${
+                        evt.status === 'FAILED' ? 'bg-red-500' :
+                        evt.status === 'SUCCEEDED' || evt.phase === 'COMPLETED' ? 'bg-emerald-400' :
+                        'bg-blue-400 animate-pulse'
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[11px] font-medium text-content-secondary">
+                          {PHASE_LABELS[evt.phase] || evt.phase}
+                        </span>
+                        <span className="text-content-muted mx-1.5">—</span>
+                        <span className="text-content-secondary">{evt.message}</span>
                       </div>
-                    ))}
-                  </div>
+                      <span className="text-[10px] text-content-muted font-mono shrink-0">
+                        {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : ''}
+                      </span>
+                    </div>
+                  ))}
                 </div>
+              )}
+
+              {/* Expandable full log */}
+              {jobEvents.length > 0 && (
+                <details className="mt-3">
+                  <summary className="text-[11px] text-content-muted cursor-pointer hover:text-content-secondary transition-colors list-none flex items-center gap-1.5">
+                    <ChevronDown className="w-3 h-3" />
+                    View full event log ({jobEvents.length} events)
+                  </summary>
+                  <div className="mt-2">
+                    <LogViewer events={jobEvents} />
+                  </div>
+                </details>
               )}
             </div>
-          )}
-        </div>
-      )}
+
+            {/* ── RESULT ──────────────────────────────────────────── */}
+            {jobResult && (
+              <div className="card p-5 space-y-4">
+                {/* Completion header */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-surface-border">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="text-sm font-semibold text-emerald-400">
+                      Agent Session Finished — Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-content-muted font-mono">
+                    {jobResult.completed_at ? new Date(jobResult.completed_at).toLocaleTimeString() : ''}
+                  </span>
+                </div>
+
+                {/* Metrics row */}
+                {jobResult.result && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
+                      <div className="flex items-center gap-1.5 text-[11px] text-content-muted mb-1">
+                        <Clock className="w-3 h-3" /> Duration
+                      </div>
+                      <div className="text-sm font-bold text-content-primary font-mono">
+                        {jobResult.result.total_duration_seconds !== undefined
+                          ? `${Number(jobResult.result.total_duration_seconds).toFixed(1)}s`
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
+                      <div className="flex items-center gap-1.5 text-[11px] text-content-muted mb-1">
+                        <RotateCcw className="w-3 h-3" /> Attempts
+                      </div>
+                      <div className="text-sm font-bold text-content-primary font-mono">
+                        {jobResult.result.attempts_used ?? '—'}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
+                      <div className="text-[11px] text-content-muted mb-1">Goal</div>
+                      <div className="text-xs font-bold text-content-primary">
+                        {selectedObj?.label || objective}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
+                      <div className="text-[11px] text-content-muted mb-1">Build</div>
+                      <div className="text-xs font-bold text-emerald-400">
+                        {jobResult.result.build_manifest?.status || 'CONFIG_ONLY'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {jobResult.result?.reasons && Array.isArray(jobResult.result.reasons) && jobResult.result.reasons.length > 0 && (
+                  <div className="p-4 rounded-xl bg-surface-elevated border border-surface-border space-y-2">
+                    <div className="text-xs font-semibold text-content-secondary uppercase tracking-wide">Recommendations</div>
+                    <ul className="space-y-2">
+                      {jobResult.result.reasons.map((reason: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2 text-xs text-content-secondary">
+                          <span className="text-accent-red mt-0.5 shrink-0">›</span>
+                          <span className="leading-relaxed">{reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Errors */}
+                {jobResult.result?.errors_encountered && Array.isArray(jobResult.result.errors_encountered) && jobResult.result.errors_encountered.length > 0 && (
+                  <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/20 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Handled During Session
+                    </div>
+                    <ul className="space-y-1 text-xs text-amber-300/80">
+                      {jobResult.result.errors_encountered.map((err: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="shrink-0 mt-0.5">•</span>
+                          <span>{err}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Trajectory — collapsed by default */}
+                {jobResult.result?.trajectory && Array.isArray(jobResult.result.trajectory) && jobResult.result.trajectory.length > 0 && (
+                  <details>
+                    <summary className="text-[11px] text-content-muted cursor-pointer hover:text-content-secondary transition-colors list-none flex items-center gap-1.5">
+                      <ChevronDown className="w-3 h-3" />
+                      Session Trajectory ({jobResult.result.trajectory.length} steps)
+                    </summary>
+                    <div className="mt-3 space-y-2 max-h-72 overflow-y-auto">
+                      {jobResult.result.trajectory.map((step: any, idx: number) => (
+                        <div key={idx} className="p-3 rounded-lg bg-surface-elevated border border-surface-border text-xs space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-content-muted px-1.5 py-0.5 rounded bg-surface-deep border border-surface-border">
+                                {step.step_index ?? idx + 1}
+                              </span>
+                              <span className="text-[10px] font-mono font-semibold text-violet-400">
+                                {PHASE_LABELS[step.phase] || step.phase}
+                              </span>
+                              <span className="font-medium text-content-primary">{step.action}</span>
+                            </div>
+                            {step.duration_seconds !== undefined && (
+                              <span className="text-content-muted text-[10px] font-mono shrink-0">
+                                {Number(step.duration_seconds).toFixed(2)}s
+                              </span>
+                            )}
+                          </div>
+                          {step.observation && (
+                            <div className="text-content-secondary text-[11px] pl-10 leading-relaxed border-l-2 border-surface-border">
+                              {step.observation}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

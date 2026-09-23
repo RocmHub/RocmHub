@@ -1,6 +1,6 @@
 import React from 'react';
 import type { HealthResponse } from '../../api/types';
-import { Cpu, AlertTriangle, Layers, Menu, X } from 'lucide-react';
+import { Cpu, AlertTriangle } from 'lucide-react';
 
 interface NavbarProps {
   health: HealthResponse | null;
@@ -18,77 +18,74 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMobileMenu,
 }) => {
   return (
-    <header className="relative h-14 border-b border-surface-border bg-surface/95 backdrop-blur-md flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
-      {/* Top subtle ambient crimson accent line */}
-      <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-accent-red/80 to-transparent" />
+    <header className="relative h-12 border-b border-surface-border bg-surface/95 backdrop-blur-md flex items-center justify-between px-5 sm:px-7 sticky top-0 z-40 shrink-0">
+      {/* Ambient accent line */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent-red/60 to-transparent" />
 
-      {/* Brand & Mobile Toggle */}
-      <div className="flex items-center space-x-3">
+      {/* Brand */}
+      <div className="flex items-center gap-3">
         {onToggleMobileMenu && (
           <button
             onClick={onToggleMobileMenu}
             aria-label="Toggle navigation menu"
-            className="md:hidden p-1.5 rounded bg-surface-elevated text-zinc-300 hover:text-white border border-surface-border transition-colors"
+            className="md:hidden p-1.5 rounded-lg bg-surface-elevated text-content-secondary hover:text-content-primary border border-surface-border transition-colors"
           >
-            {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {isMobileMenuOpen
+                ? <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+                : <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+              }
+            </svg>
           </button>
         )}
-        <div className="w-7 h-7 rounded bg-gradient-to-br from-accent-red to-red-700 flex items-center justify-center font-bold text-white text-xs tracking-wider font-mono shrink-0 shadow-sm shadow-red-950/50">
+
+        {/* Logo mark */}
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-red to-red-800 flex items-center justify-center font-black text-white text-[11px] tracking-wider shrink-0 shadow-md shadow-red-950/60 glow-red-sm">
           RH
         </div>
-        <div className="flex items-center space-x-2.5">
-          <span className="font-bold text-content-primary tracking-tight">ROCmHub</span>
-          <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-accent-red-muted text-red-400 border border-red-500/20">
-            v0.1.0 MVP
+
+        <div className="flex items-center gap-2.5">
+          <span className="font-bold text-content-primary tracking-tight text-[15px]">ROCmHub</span>
+          <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-accent-red/10 text-red-400 border border-red-500/20">
+            v0.1.0
           </span>
-          <span className="hidden lg:inline text-[11px] font-mono text-zinc-500 tracking-normal">Engineering Platform</span>
         </div>
       </div>
 
-      {/* Hardware & Backend Status */}
-      <div className="flex items-center space-x-4 text-xs font-mono">
-        {/* Backend health pill */}
-        <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-surface-elevated border border-surface-border">
+      {/* Right: hardware status only */}
+      <div className="flex items-center gap-3 text-xs">
+        {/* Connection dot */}
+        <div className="flex items-center gap-1.5">
           {isLoading ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-zinc-500 animate-pulse" />
-              <span className="text-zinc-400">Connecting...</span>
-            </>
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
           ) : isError || !health ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-red-500" />
-              <span className="text-red-400">Backend Offline</span>
-            </>
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
           ) : (
-            <>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-zinc-300">API v{health.version}</span>
-            </>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           )}
+          <span className="hidden sm:inline text-content-muted font-mono text-[11px]">
+            {isLoading ? 'Connecting' : isError || !health ? 'Offline' : 'Online'}
+          </span>
         </div>
 
-        {/* Hardware Status Pill */}
+        {/* Hardware status pill */}
         {health && (
-          <div className="flex items-center space-x-2 px-2.5 py-1 rounded bg-surface-elevated border border-surface-border">
-            <Cpu className="w-3.5 h-3.5 text-zinc-400" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-elevated border border-surface-border">
             {health.rocm_available ? (
-              <span className="text-emerald-400">
-                ROCm GPU: {health.system.gpus[0]?.gfx_target || health.system.gpus[0]?.device_name || 'Active'}
-              </span>
+              <>
+                <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-400 font-medium text-[11px] font-mono">
+                  {health.system.gpus[0]?.gfx_target || 'AMD GPU'}
+                </span>
+              </>
             ) : (
-              <span className="text-amber-400 flex items-center space-x-1" title={health.warnings[0] || 'Running in CONFIG_ONLY mode'}>
-                <AlertTriangle className="w-3 h-3 text-amber-400 inline" />
-                <span>No AMD ROCm GPU (CONFIG_ONLY mode)</span>
-              </span>
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-amber-400 font-medium text-[11px] hidden sm:inline" title={health.warnings[0]}>
+                  CONFIG ONLY
+                </span>
+              </>
             )}
-          </div>
-        )}
-
-        {/* Queue telemetry */}
-        {health?.orchestrator && (
-          <div className="hidden md:flex items-center space-x-2 px-2.5 py-1 rounded bg-surface-elevated border border-surface-border text-zinc-400">
-            <Layers className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Queue: {health.orchestrator.queue_size}</span>
           </div>
         )}
       </div>

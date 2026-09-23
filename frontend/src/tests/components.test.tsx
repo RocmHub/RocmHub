@@ -59,7 +59,7 @@ describe('Common Components', () => {
     expect(screen.getByText('PLANNING')).toBeInTheDocument();
   });
 
-  it('renders DashboardView with hardware notice and metrics', () => {
+  it('renders DashboardView with hardware notice and job history', () => {
     const mockHealth: HealthResponse = {
       status: 'healthy',
       version: '0.1.0',
@@ -103,8 +103,13 @@ describe('Common Components', () => {
       />
     );
 
-    expect(screen.getByText('System Dashboard')).toBeInTheDocument();
-    expect(screen.getByText('Host Hardware Notice')).toBeInTheDocument();
+    // Product hero
+    expect(screen.getByText('Prepare AI Models')).toBeInTheDocument();
+
+    // Hardware notice (CONFIG ONLY mode shown)
+    expect(screen.getByText(/CONFIG ONLY mode/)).toBeInTheDocument();
+
+    // Jobs table
     expect(screen.getByText('job_abc')).toBeInTheDocument();
     expect(screen.getByText('Qwen/Qwen2.5-0.5B-Instruct')).toBeInTheDocument();
   });

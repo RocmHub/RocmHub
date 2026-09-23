@@ -1,6 +1,6 @@
 /**
- * ROCmHub Phase 15: Automated Real Browser E2E Acceptance Test
- * 
+ * ROCmHub Phase 22: Automated Real Browser E2E Acceptance Test
+ *
  * Drives Google Chrome via puppeteer-core against the live FastAPI backend
  * and Vite frontend, validating the complete user journey across all 5 views
  * for both Desktop and Mobile viewports, capturing verified screenshots.
@@ -84,7 +84,7 @@ async function clickByText(page, text, tag = 'button') {
 
 async function main() {
   console.log('='.repeat(70));
-  console.log('ROCmHub Phase 15: Real Browser E2E Acceptance Verification');
+  console.log('ROCmHub Phase 22: Real Browser E2E Acceptance Verification');
   console.log('='.repeat(70));
 
   // 1. Launch FastAPI backend
@@ -110,7 +110,7 @@ async function main() {
     { env: backendEnv, stdio: 'pipe' }
   );
 
-  // 2. Launch Vite Preview/Dev server
+  // 2. Launch Vite frontend
   console.log('[2/8] Launching Vite frontend server on port ' + FRONTEND_PORT + '...');
   const frontendEnv = {
     ...process.env,
@@ -132,7 +132,7 @@ async function main() {
     await waitForHttp(`http://127.0.0.1:${FRONTEND_PORT}`);
     console.log(` -> Frontend online at http://127.0.0.1:${FRONTEND_PORT}`);
 
-    // 3. Launch Real Google Chrome Headless
+    // 3. Launch Chrome
     console.log(`[3/8] Launching Google Chrome (${CHROME_PATH})...`);
     browser = await puppeteer.launch({
       executablePath: CHROME_PATH,
@@ -141,13 +141,13 @@ async function main() {
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 860 });
+    await page.setViewport({ width: 1440, height: 900 });
 
     // 4. Load Dashboard
     console.log('[4/8] Navigating to ROCmHub Web Application...');
     await page.goto(`http://127.0.0.1:${FRONTEND_PORT}`, { waitUntil: 'networkidle0' });
     await waitForText(page, 'ROCmHub');
-    await waitForText(page, 'System Dashboard');
+    await waitForText(page, 'Prepare AI Models for AMD Hardware');
     await sleep(800);
 
     const dashShot = path.join(SCREENSHOT_DIR, '01_dashboard_desktop.png');
@@ -170,8 +170,8 @@ async function main() {
       await sleep(300);
     }
 
-    // Restore Desktop Viewport
-    await page.setViewport({ width: 1280, height: 860 });
+    // Restore Desktop Viewport — 1440px to match new wide layout
+    await page.setViewport({ width: 1440, height: 900 });
     await sleep(300);
 
     // 6. Full User Scenario Walkthrough
@@ -180,14 +180,13 @@ async function main() {
     // --- STEP 1: Model Explorer ---
     console.log(' -> [Journey 1/5] Model Explorer: Inspect Qwen/Qwen2.5-0.5B-Instruct');
     await clickByText(page, 'Model Explorer');
-    await waitForText(page, 'Inspect Hugging Face model metadata');
+    await waitForText(page, 'Find and validate AI models');
     await sleep(400);
 
-    // Submit model inspection
-    await clickByText(page, 'Inspect Model');
+    await clickByText(page, 'Inspect');
     console.log('    Resolving Hugging Face metadata & commit SHA...');
     await waitForText(page, 'Qwen/Qwen2.5-0.5B-Instruct');
-    await waitForText(page, 'Immutable SHA:');
+    await waitForText(page, 'Immutable SHA');
     await waitForText(page, 'Qwen2ForCausalLM');
     console.log('    Metadata resolved: Qwen2ForCausalLM, commit SHA verified.');
     await sleep(600);
@@ -204,7 +203,7 @@ async function main() {
 
     await clickByText(page, 'Generate Forge Plan');
     console.log('    Generating deterministic recipe plan...');
-    await waitForText(page, 'Deterministic Plan');
+    await waitForText(page, 'Build Plan');
     await waitForText(page, 'pytorch_transformers_hip');
     console.log('    Deterministic plan created with recipe pytorch_transformers_hip.');
     await sleep(500);
@@ -220,17 +219,17 @@ async function main() {
     await page.screenshot({ path: forgeShot });
     console.log(`    Screenshot captured: ${forgeShot}`);
 
-    // --- STEP 3: Autonomous AI Engineer ---
-    console.log(' -> [Journey 3/5] Autonomous AI Engineer: Launch Autonomous Loop');
+    // --- STEP 3: AI Engineer ---
+    console.log(' -> [Journey 3/5] AI Engineer: Launch Autonomous Preparation Session');
     await clickByText(page, 'AI Engineer');
-    await waitForText(page, 'Specialized agent executing iterative model preparation loops');
+    await waitForText(page, 'Autonomous model preparation for AMD hardware');
     await sleep(500);
 
-    await clickByText(page, 'Launch AI Engineer Session');
-    console.log('    Agent session launched; observing autonomous action loop...');
+    await clickByText(page, 'Start Session');
+    console.log('    Session launched; observing autonomous activity...');
     await waitForText(page, 'Agent Session Finished — Domain Status: CONFIG_ONLY', 45000);
-    await waitForText(page, 'Decision Rationale & Executive Summary');
-    console.log('    AI Engineer concluded with structured trajectory & report!');
+    await waitForText(page, 'Recommendations');
+    console.log('    AI Engineer session complete with recommendations!');
     await sleep(600);
 
     const engShot = path.join(SCREENSHOT_DIR, '05_ai_engineer_report.png');
@@ -240,10 +239,10 @@ async function main() {
     // --- STEP 4: Optimization Lab ---
     console.log(' -> [Journey 4/5] Optimization Lab: Multi-Candidate Comparison');
     await clickByText(page, 'Optimization Lab');
-    await waitForText(page, 'Optimization Run Configuration');
+    await waitForText(page, 'Optimization Workspace');
     await sleep(500);
 
-    await clickByText(page, 'Run Optimization Job');
+    await clickByText(page, 'Run Optimization');
     console.log('    Optimization job enqueued; exploring candidate variants...');
     await waitForText(page, 'Candidate Comparison Table', 45000);
     await waitForText(page, 'NOT_MEASURED');
@@ -254,20 +253,20 @@ async function main() {
     await page.screenshot({ path: optShot });
     console.log(`    Screenshot captured: ${optShot}`);
 
-    // --- STEP 5: Dashboard Inspection & Deep-Linking ---
+    // --- STEP 5: Dashboard with job history ---
     console.log(' -> [Journey 5/5] Dashboard: Job History Table & Deep Linking');
-    await clickByText(page, 'Dashboard');
-    await waitForText(page, 'Recent Execution Jobs');
+    await clickByText(page, 'Home');
+    await waitForText(page, 'Recent Jobs');
     await sleep(600);
 
-    // Verify all 3 jobs are present in the table
+    // Verify all 3 job types in the table
     const tableHtml = await page.evaluate(() => document.querySelector('tbody')?.innerText || '');
     console.log('    Recent Jobs Table Contents Verified:');
-    for (const jobType of ['FORGE_BUILD', 'ENGINEER', 'OPTIMIZATION']) {
+    for (const jobType of ['Forge Build', 'AI Engineer', 'Optimization']) {
       if (tableHtml.includes(jobType)) {
-        console.log(`     ✓ Found ${jobType} in recent jobs`);
+        console.log(`     ✓ Found "${jobType}" in recent jobs`);
       } else {
-        console.warn(`     ! Missing ${jobType}`);
+        console.warn(`     ! Missing "${jobType}"`);
       }
     }
 
@@ -275,12 +274,12 @@ async function main() {
     await page.screenshot({ path: finalDashShot });
     console.log(`    Screenshot captured: ${finalDashShot}`);
 
-    // Test Inspect deep-link
-    await clickByText(page, 'Inspect');
+    // Deep-link inspect
+    await clickByText(page, 'Open');
     await sleep(800);
-    console.log('    Clicked "Inspect": navigated and loaded job details successfully.');
+    console.log('    Clicked "Open": navigated and loaded job details successfully.');
 
-    // 7. Copy screenshots to Artifacts directory if configured
+    // 7. Copy to ARTIFACT_DIR
     if (ARTIFACT_DIR && fs.existsSync(ARTIFACT_DIR)) {
       console.log(`[7/8] Copying screenshots to artifact directory (${ARTIFACT_DIR})...`);
       const files = fs.readdirSync(SCREENSHOT_DIR);

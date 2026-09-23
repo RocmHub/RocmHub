@@ -22,23 +22,23 @@ async def sse_event_stream(
     from_event_id: int = 0,
 ) -> AsyncIterator[str]:
     """Stream SSE events for a job, replaying history then subscribing live until terminal state."""
-    # 1. Replay historical events from SQLite
-    past_events = manager.db.get_events(job_id, from_event_id=from_event_id)
-    last_seen_id = from_event_id
-    for evt in past_events:
-        last_seen_id = max(last_seen_id, evt.event_id)
-        yield format_sse_event(evt)
-
-    # 2. Check if job is already in a terminal state
-    job = manager.get_job(job_id)
-    if not job or job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED):
-        return
-
-    # 3. Subscribe for live incoming events
+    # 1. Subscribe for live incoming events first to eliminate race condition gaps
     subscriber_queue: asyncio.Queue[JobEvent] = asyncio.Queue()
     manager.register_subscriber(job_id, subscriber_queue)
 
     try:
+        # 2. Replay historical events from SQLite
+        past_events = manager.db.get_events(job_id, from_event_id=from_event_id)
+        last_seen_id = from_event_id
+        for evt in past_events:
+            last_seen_id = max(last_seen_id, evt.event_id)
+            yield format_sse_event(evt)
+
+        # 3. Check if job is already in a terminal state
+        job = manager.get_job(job_id)
+        if not job or job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED):
+            return
+
         while True:
             try:
                 event = await asyncio.wait_for(subscriber_queue.get(), timeout=15.0)

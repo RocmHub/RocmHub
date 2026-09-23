@@ -87,12 +87,17 @@ def validate_job_path(path: str | Path, allowed_roots: List[Path]) -> Path:
         except ValueError:
             pass
 
-    # Ensure path is within at least one allowed root
+    # Ensure path is strictly within at least one allowed root (must be a subdirectory, not root itself)
     matched = False
     for allowed in allowed_roots:
         allowed_resolved = allowed.resolve()
         try:
-            resolved.relative_to(allowed_resolved)
+            rel = resolved.relative_to(allowed_resolved)
+            if rel == Path("."):
+                raise SecurityBoundaryError(
+                    f"Directory '{resolved}' matches an allowed workspace root exactly. An output directory must be a subdirectory.",
+                    details={"path": str(resolved), "allowed_root": str(allowed_resolved)},
+                )
             matched = True
             break
         except ValueError:

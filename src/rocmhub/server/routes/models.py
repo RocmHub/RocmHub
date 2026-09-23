@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Dict
 
@@ -29,6 +30,13 @@ async def get_model_info(
     revision: str = Query(default="main", description="Branch, tag, or 40-char commit SHA"),
 ) -> Dict[str, Any]:
     """Inspect remote Hugging Face model metadata, resolve immutable commit SHA, and check architecture."""
+    # Path traversal and injection defense
+    if ".." in model_id or model_id.startswith("/") or not re.match(r"^[a-zA-Z0-9_\.\-]+(/[a-zA-Z0-9_\.\-]+)?$", model_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid model identifier '{model_id}'. Must match standard repository naming without directory traversal.",
+        )
+
     source = HuggingFaceModelSource()
     inspector = ModelInspector(source)
 

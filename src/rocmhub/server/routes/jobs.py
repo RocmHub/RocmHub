@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import Path as PathParam
 from fastapi.responses import StreamingResponse
 
 from rocmhub.core.errors import SecurityBoundaryError
@@ -20,6 +21,8 @@ from rocmhub.server.orchestrator.models import (
 )
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
+
+JOB_ID_PATTERN = r"^[a-zA-Z0-9_\-]{1,64}$"
 
 
 @router.get("", response_model=JobListResponse)
@@ -56,7 +59,10 @@ async def create_job(request_body: JobCreateRequest, req: Request) -> JobRespons
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-async def get_job_status(job_id: str, req: Request) -> JobResponse:
+async def get_job_status(
+    job_id: str = PathParam(..., pattern=JOB_ID_PATTERN, description="Unique job identifier"),
+    req: Request = None,  # type: ignore[assignment]
+) -> JobResponse:
     """Retrieve the current execution status and metadata of a job."""
     manager: JobManager = req.app.state.job_manager
     job = manager.get_job(job_id)
@@ -70,8 +76,8 @@ async def get_job_status(job_id: str, req: Request) -> JobResponse:
 
 @router.get("/{job_id}/events")
 async def get_job_events(
-    job_id: str,
-    req: Request,
+    job_id: str = PathParam(..., pattern=JOB_ID_PATTERN, description="Unique job identifier"),
+    req: Request = None,  # type: ignore[assignment]
     from_event_id: int = Query(default=0, ge=0, description="Start streaming from this event ID"),
     last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
@@ -104,7 +110,10 @@ async def get_job_events(
 
 
 @router.get("/{job_id}/result", response_model=JobResultResponse)
-async def get_job_result(job_id: str, req: Request) -> JobResultResponse:
+async def get_job_result(
+    job_id: str = PathParam(..., pattern=JOB_ID_PATTERN, description="Unique job identifier"),
+    req: Request = None,  # type: ignore[assignment]
+) -> JobResultResponse:
     """Retrieve detailed domain results (manifest, report, comparisons) of a finished job."""
     manager: JobManager = req.app.state.job_manager
     result = manager.get_job_result(job_id)
@@ -117,7 +126,10 @@ async def get_job_result(job_id: str, req: Request) -> JobResultResponse:
 
 
 @router.post("/{job_id}/cancel")
-async def cancel_job(job_id: str, req: Request) -> Dict[str, Any]:
+async def cancel_job(
+    job_id: str = PathParam(..., pattern=JOB_ID_PATTERN, description="Unique job identifier"),
+    req: Request = None,  # type: ignore[assignment]
+) -> Dict[str, Any]:
     """Request cooperative cancellation of a queued or running job."""
     manager = req.app.state.job_manager
     job = manager.get_job(job_id)

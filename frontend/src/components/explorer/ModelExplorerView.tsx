@@ -121,7 +121,7 @@ export const ModelExplorerView: React.FC<ModelExplorerViewProps> = ({
                 <h2 className="text-base font-bold text-content-primary font-mono">{metadata.model_id}</h2>
                 <div className="flex items-center space-x-2 text-xs font-mono text-zinc-400 mt-1">
                   <span>Immutable SHA:</span>
-                  <span className="text-zinc-200 bg-black/40 px-1.5 py-0.5 rounded border border-zinc-800">
+                  <span className="text-zinc-200 bg-black/40 px-1.5 py-0.5 rounded border border-zinc-800 break-all">
                     {metadata.commit_sha}
                   </span>
                 </div>

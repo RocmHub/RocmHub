@@ -430,6 +430,26 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] Worker integration: forwarded `execute_inference` flag from orchestrator payload to ForgeExecutor.
 - **Verification**: 364 Pytest unit tests passed (including dedicated `tests/test_doctor.py` and `tests/test_execution_safety.py`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean. Safe dry-run verified on macOS.
 
+### Phase 18: Release Candidate Hardening (COMPLETED)
+- [x] Cross-layer contract audit across CLI, FastAPI, worker, Forge, AI Engineer, Optimization, Validation, Benchmarks, Artifacts, and Frontend.
+- [x] API hardening:
+  - Input path traversal protection in `src/rocmhub/server/security.py`: output directories forbidden from matching workspace roots directly.
+  - Job ID format validation pattern in `src/rocmhub/server/routes/jobs.py` (`^[a-zA-Z0-9_\-]{1,64}$`), rejecting traversal and malformed identifiers with 422.
+  - Model identifier path traversal rejection in `src/rocmhub/server/routes/models.py`.
+  - Global unhandled exception handler in `src/rocmhub/server/app.py` ensuring zero tracebacks or secret leakage on internal errors.
+  - SSE subscriber registration reordering in `src/rocmhub/server/events.py` eliminating historical replay race condition gaps.
+- [x] Packaging and installability:
+  - Added explicit package data for `py.typed` in `pyproject.toml`.
+  - Built production wheel (`rocmhub-0.1.0-py3-none-any.whl`) and sdist.
+  - Created automated fresh environment smoke test (`scripts/fresh_install_smoke.py`).
+- [x] Frontend hardening:
+  - URL hash navigation synchronization and history handling (`#dashboard`, `#explorer`, `#forge`, `#engineer`, `#optimization`).
+  - Deep-link support with `?job_id=...` parameter.
+  - Overflow protection with `break-all` for long commit SHAs and SHA256 digests.
+- [x] CI audit & enhancement:
+  - Multi-version CI (`.github/workflows/ci.yml`) updated with package build and fresh wheel installation smoke testing.
+- **Verification**: 368 Pytest unit tests passed (+4 new tests in `TestApiHardening`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean, Chrome E2E 100% pass, fresh environment smoke test 100% pass.
+
 ---
 
 ## 3. Definition of Done (Criteria of Readiness for Vertical Slice 1)

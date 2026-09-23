@@ -68,6 +68,17 @@ def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
             },
         )
 
+    # 4. Unhandled server exception handler (prevents trace leakage)
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "InternalServerError",
+                "detail": "An internal server error occurred while processing the request.",
+            },
+        )
+
     # 4. Include Routers
     app.include_router(health_router)
     app.include_router(models_router)

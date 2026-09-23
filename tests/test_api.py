@@ -487,3 +487,56 @@ class TestJobLifecycleAndOrchestration:
         assert job_queue is not None
         assert job_queue.status == JobStatus.FAILED
         assert job_queue.error_code == "QUEUE_DISCARDED_ON_RESTART"
+
+
+class TestApiHardening:
+    """Regression tests for Phase 18 API hardening and security boundaries."""
+
+    def test_malformed_job_id_rejected(self, temp_env: Any) -> None:
+        client, _, _, _ = temp_env
+
+        # Special chars and traversal patterns
+        for invalid_id in ["bad!id", "job@123", "job%23456", "a" * 100]:
+            resp = client.get(f"/api/v1/jobs/{invalid_id}")
+            assert resp.status_code == 422, f"Expected 422 for job_id '{invalid_id}', got {resp.status_code}"
+
+    def test_validate_job_path_exact_root_rejected(self, temp_env: Any) -> None:
+        from rocmhub.core.errors import SecurityBoundaryError
+        from rocmhub.server.security import validate_job_path
+
+        _, _, _, workspace = temp_env
+        allowed_roots = [workspace]
+
+        # Subdirectory should pass
+        valid_sub = validate_job_path(workspace / "sub_build", allowed_roots)
+        assert valid_sub == (workspace / "sub_build").resolve()
+
+        # Exact root must fail
+        with pytest.raises(SecurityBoundaryError, match="matches an allowed workspace root exactly"):
+            validate_job_path(workspace, allowed_roots)
+
+    def test_model_id_path_traversal_rejected(self, temp_env: Any) -> None:
+        client, _, _, _ = temp_env
+
+        # Traversal and invalid patterns
+        for bad_model in ["..%2F..%2Fetc%2Fpasswd", "bad..repo/name", "bad/repo/with/extra/slashes"]:
+            resp = client.get(f"/api/v1/models/{bad_model}")
+            assert resp.status_code == 400
+            assert "Invalid model identifier" in resp.json()["detail"]
+
+    def test_unhandled_exception_does_not_leak_stacktrace(self, temp_env: Any) -> None:
+        _, config, _, _ = temp_env
+        from fastapi.testclient import TestClient
+
+        from rocmhub.server.app import create_app
+
+        safe_app = create_app(config)
+        safe_client = TestClient(safe_app, raise_server_exceptions=False)
+
+        with patch("rocmhub.server.routes.health.SystemObserver.observe", side_effect=RuntimeError("SecretDatabasePassword123")):
+            resp = safe_client.get("/health")
+            assert resp.status_code == 500
+            data = resp.json()
+            assert data["error"] == "InternalServerError"
+            assert "SecretDatabasePassword123" not in resp.text
+            assert "Traceback" not in resp.text

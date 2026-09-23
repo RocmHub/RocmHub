@@ -49,6 +49,9 @@ rocmhub = "rocmhub.cli.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+rocmhub = ["py.typed"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]

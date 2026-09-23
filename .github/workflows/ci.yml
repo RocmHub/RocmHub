@@ -42,6 +42,15 @@ jobs:
         run: |
           pytest
 
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Smoke test fresh wheel installation in isolated environment
+        run: |
+          python scripts/fresh_install_smoke.py
+
   frontend-quality:
     name: Frontend (Vitest & Build)
     runs-on: ubuntu-latest

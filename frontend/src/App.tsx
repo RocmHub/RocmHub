@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth, fetchJobs } from './api/client';
 import { Navbar } from './components/layout/Navbar';
@@ -9,14 +9,46 @@ import { ForgeStudioView } from './components/forge/ForgeStudioView';
 import { AIEngineerView } from './components/engineer/AIEngineerView';
 import { OptimizationLabView } from './components/optimization/OptimizationLabView';
 
+const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'forge', 'engineer', 'optimization'];
+
+function getInitialTab(): NavTab {
+  if (typeof window === 'undefined') return 'dashboard';
+  const hash = window.location.hash.replace('#', '').toLowerCase();
+  return VALID_TABS.includes(hash as NavTab) ? (hash as NavTab) : 'dashboard';
+}
+
+function getInitialJobId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('job_id');
+}
+
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedModelForForge, setSelectedModelForForge] = useState({
     modelId: 'Qwen/Qwen2.5-0.5B-Instruct',
     revision: 'main',
   });
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(getInitialJobId);
+
+  // Sync activeTab with URL hash
+  const switchTab = (tab: NavTab) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined' && window.location.hash !== `#${tab}`) {
+      window.location.hash = tab;
+    }
+  };
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (VALID_TABS.includes(hash as NavTab)) {
+        setActiveTab(hash as NavTab);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Poll system health
   const {
@@ -42,7 +74,7 @@ export const App: React.FC = () => {
 
   const handleSelectModelForForge = (modelId: string, revision?: string) => {
     setSelectedModelForForge({ modelId, revision: revision || 'main' });
-    setActiveTab('forge');
+    switchTab('forge');
   };
 
   const handleSelectJob = (jobId: string) => {
@@ -50,11 +82,11 @@ export const App: React.FC = () => {
     // Find job type to navigate to the respective studio tab
     const job = jobsList?.items.find((j) => j.job_id === jobId);
     if (job?.job_type === 'ENGINEER') {
-      setActiveTab('engineer');
+      switchTab('engineer');
     } else if (job?.job_type === 'OPTIMIZATION') {
-      setActiveTab('optimization');
+      switchTab('optimization');
     } else {
-      setActiveTab('forge');
+      switchTab('forge');
     }
   };
 
@@ -79,7 +111,7 @@ export const App: React.FC = () => {
         {/* Left Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={switchTab}
           isOpenMobile={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
@@ -91,7 +123,7 @@ export const App: React.FC = () => {
               health={health ?? null}
               jobsList={jobsList ?? null}
               isLoadingJobs={isLoadingJobs}
-              onNavigate={setActiveTab}
+              onNavigate={switchTab}
               onSelectJob={handleSelectJob}
             />
           )}
@@ -99,7 +131,7 @@ export const App: React.FC = () => {
           {activeTab === 'explorer' && (
             <ModelExplorerView
               onSelectModelForForge={handleSelectModelForForge}
-              onNavigate={setActiveTab}
+              onNavigate={switchTab}
             />
           )}
 

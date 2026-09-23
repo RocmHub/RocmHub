@@ -7,8 +7,9 @@ import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
 import {
-  BrainCircuit, Play, XCircle, CheckCircle2, Clock, RotateCcw,
+  Play, XCircle, CheckCircle2, Clock, RotateCcw,
   AlertCircle, ChevronDown, ChevronUp,
+  Shield, Zap, Timer, Layers,
 } from 'lucide-react';
 
 import aiEngineerHeroImg from '../../assets/visuals/ai_engineer_hero.svg';
@@ -23,25 +24,25 @@ const OBJECTIVES = [
     id: 'BASE_PREPARATION',
     label: 'Base Preparation',
     desc: 'Verify runtime compatibility and validate model configuration',
-    icon: '◈',
+    Icon: Shield,
   },
   {
     id: 'MAX_THROUGHPUT',
     label: 'Max Throughput',
     desc: 'Optimize for highest generation tokens per second',
-    icon: '⚡',
+    Icon: Zap,
   },
   {
     id: 'MIN_LATENCY',
     label: 'Min Latency',
     desc: 'Minimize time-to-first-token for responsive inference',
-    icon: '◎',
+    Icon: Timer,
   },
   {
     id: 'FULL_PREPARATION',
     label: 'Full Preparation',
     desc: 'Complete weight materialization when hardware is confirmed',
-    icon: '▣',
+    Icon: Layers,
   },
 ];
 
@@ -217,6 +218,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {OBJECTIVES.map((obj) => {
               const isSelected = objective === obj.id;
+              const Icon = obj.Icon;
               return (
                 <button
                   key={obj.id}
@@ -228,8 +230,8 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                       : 'card hover:border-zinc-600 hover:bg-surface-elevated'
                   }`}
                 >
-                  <div className={`text-lg mb-2 ${isSelected ? 'text-violet-400' : 'text-content-muted'}`}>
-                    <BrainCircuit className="w-5 h-5" />
+                  <div className={`mb-2 ${isSelected ? 'text-violet-400' : 'text-content-muted'}`}>
+                    <Icon className="w-5 h-5" />
                   </div>
                   <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-content-primary' : 'text-content-secondary'}`}>
                     {obj.label}

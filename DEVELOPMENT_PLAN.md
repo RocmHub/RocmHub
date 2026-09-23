@@ -450,6 +450,22 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
   - Multi-version CI (`.github/workflows/ci.yml`) updated with package build and fresh wheel installation smoke testing.
 - **Verification**: 368 Pytest unit tests passed (+4 new tests in `TestApiHardening`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean, Chrome E2E 100% pass, fresh environment smoke test 100% pass.
 
+### Phase 19: MVP Release Packaging (COMPLETED)
+- [x] Unified release identity to `0.1.0` across Python package (`__version__`), CLI (`rocmhub --version`), frontend, and metadata.
+- [x] Reworked `README.md` into comprehensive 3-5 minute onboarding entry point with clear distinction between IMPLEMENTED capabilities and target physical AMD validation.
+- [x] Added minimal reproducible Quick Start guide with safe no-GPU workflow and interactive demo tour (`scripts/mvp_demo_tour.py`).
+- [x] Created `CHANGELOG.md` following Keep a Changelog standard with explicit Known Limitations.
+- [x] Created `RELEASE_NOTES_0.1.0.md` detailing architecture, verified capabilities, test boundaries, and next milestones.
+- [x] Created declarative example configuration `examples/qwen2.5-0.5b-fp16.json`.
+- [x] Added GitHub hygiene templates:
+  - `.github/ISSUE_TEMPLATE/bug_report.md` (with hardware diagnostics fields: OS, Python, ROCm, GPU, gfx, kfd)
+  - `.github/ISSUE_TEMPLATE/feature_request.md`
+  - `.github/pull_request_template.md` (with Hardware Truthfulness checklist)
+- [x] Created `CONTRIBUTING.md` enshrining the Prime Rule of Hardware Truthfulness ("Mock test != hardware validation. Static gfx list != supported GPU certification.").
+- [x] Created `SECURITY.md` establishing private vulnerability disclosure via GitHub Security Advisories.
+- [x] Re-verified packaging: sdist and wheel build, wheel contents inspection (LICENSE, py.typed, entry_points), and automated fresh environment installation smoke testing.
+- **Verification**: Full test suite pass (368 Pytest unit tests), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean, Chrome E2E 100% pass, fresh environment smoke test 100% pass.
+
 ---
 
 ## 3. Definition of Done (Criteria of Readiness for Vertical Slice 1)

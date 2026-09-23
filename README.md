@@ -1,70 +1,131 @@
 # ROCmHub
 
-> *"We make every open model AMD-ready automatically."*
+> Open-source tooling and engineering platform for preparing, benchmarking, validating, and optimizing AI models for AMD ROCm.
 
-ROCmHub is an open-source platform designed to automate the preparation, optimization, benchmarking, and publishing of open AI models on AMD GPUs (Radeon and Instinct) and the ROCm software stack.
-
----
-
-## Current Status: Phase 17 (AMD Execution Readiness Complete)
-
-ROCmHub features a complete platform stack validated by real Google Chrome E2E browser testing, multi-version CI, and standalone AMD inference execution harness:
-- **Core Domain Engine**: Model acquisition, static inspection, hardware detection, Benchmark Guard, and reproducible artifact builder.
-- **Model Forge & Execution Readiness**: Automated preparation, reproducible recipe generation (`pytorch_transformers_hip`), standalone execution harness with timeout and stdout/stderr capture, and `rocmhub forge execute` CLI.
-- **Autonomous AI Engineer**: Bounded agentic loop for AMD GPU model optimization and failure recovery with structured trajectory and executive reports.
-- **Optimization Engine**: Multi-candidate generation, compilation, execution, and objective comparison against immutable baselines (truthful `NOT_MEASURED` semantics on non-ROCm hosts).
-- **Backend API & Job Orchestrator**: FastAPI server (`rocmhub serve`) with FIFO SQLite job queue, SSE event streaming, directory locking, cooperative cancellation, and crash recovery.
-- **Frontend Workspace**: Responsive React 18 / TypeScript / Vite / Tailwind CSS web application featuring mobile navigation drawer, real-time SSE log streaming, live hardware telemetry, deep linking, model explorer, forge studio, AI engineer workspace, and optimization lab.
-- **Licensing & CI**: Standard Apache-2.0 license, full GitHub Actions CI pipeline covering Python 3.9–3.12 (linting, type checking, pytest) and Node 20 (Vitest, Vite production build).
-
-For architectural decisions, principles, and roadmap, see:
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
+[![CI](https://github.com/rocmhub/rocmhub/actions/workflows/ci.yml/badge.svg)](https://github.com/rocmhub/rocmhub/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](pyproject.toml)
+[![Release](https://img.shields.io/badge/Release-0.1.0_MVP-green)](RELEASE_NOTES_0.1.0.md)
 
 ---
 
-## Key Principles
+## What is ROCmHub?
 
-1. **Deterministic Reproducibility**: Full provenance for every run (immutable commit SHA, exact GPU, open `gfx` target, ROCm/HIP versions, driver, and environment variables).
-2. **Benchmark Guard Integrity**: Benchmarking is isolated from optimization. Diagnostic mode on non-ROCm machines never generates synthetic or fake performance metrics.
-3. **Runtime-Agnostic Core**: Inference engines are decoupled behind adapters (PyTorch baseline, with future vLLM / SGLang integration).
-4. **Hardware Heterogeneity**: First-class support for both AMD Instinct (CDNA) and AMD Radeon (RDNA) without hardcoded vendor assumptions.
+ROCmHub is an open-source engineering platform designed to automate and standardize the process of preparing, running, verifying, benchmarking, and optimizing open AI models (such as Hugging Face CausalLM architectures) for AMD GPUs (Radeon and Instinct) and the AMD ROCm software stack.
+
+ROCmHub provides a disciplined, reproducible engineering harness with:
+- **Deterministic Build Planning**: Pre-flight validation, disk quotas, and standalone executable launch scripts;
+- **Strict Execution Provenance**: Immutable 40-character Git commit SHAs, exact GPU device telemetry, and `gfx` targets;
+- **Truthful Status Reporting**: Zero synthetic metrics. When a GPU measurement cannot be taken, the status evaluates cleanly to `NOT_MEASURED` or `CONFIG_ONLY`;
+- **Output Quality & Correctness Gates**: Numeric corruption detection (`NaN`, `inf`, replacement characters) and token agreement evaluation;
+- **Statistical Reproducibility**: Benchmark Guard with Median Absolute Deviation (MAD) dispersion checks;
+- **Autonomous AI Engineer**: Bounded optimization agent for automated iteration and failure recovery;
+- **Interactive Workspaces**: Unified CLI, local REST API, and modern reactive web application.
+
+> [!NOTE]
+> ROCmHub is an independent open-source developer tool. It is **not** an official AMD product and does not claim official hardware certification.
 
 ---
 
-## Installation & Development
+## Current MVP Capabilities: Implemented vs. Physically Validated
 
-### Prerequisites
-- Python 3.9+
-- Node.js 18+ and npm
-- Linux with ROCm 6.0+ and AMD GPU (for native inference benchmarking)
-- macOS / Windows / Linux (for development, schema validation, and diagnostic mode)
+To maintain strict scientific and technical transparency, we clearly delineate between what is **implemented in code / tested in CI** and what is **physically validated on AMD hardware**:
 
-### Backend Setup
+| Capability | Status | Implementation Details |
+|---|---|---|
+| **Model Metadata Inspection** | **IMPLEMENTED** | Hugging Face Hub metadata, config params, architecture check, and immutable 40-char commit SHA resolution without downloading weights. |
+| **Hardware & Environment Diagnostics** | **IMPLEMENTED** | `rocmhub doctor` checks OS, `/dev/kfd` access, user groups (`render`, `video`), `rocm-smi`, GPU detection, and PyTorch HIP runtime. |
+| **Model Forge (Planning & Materialization)** | **IMPLEMENTED** | `ForgePlanner` generates deterministic recipes (`pytorch_transformers_hip`), verified build manifests, and standalone `run_inference.py` launchers. |
+| **Safe CONFIG_ONLY Mode** | **IMPLEMENTED** | Generates all runtime scripts and configs without downloading weight tensors or executing inference. |
+| **AMD Execution Harness** | **IMPLEMENTED** | Subprocess execution harness with stdout/stderr capture, timeout enforcement, and structured JSON metrics reporting. |
+| **Validation Engine** | **IMPLEMENTED** | Output corruption gate (rejects `NaN`, `inf`, `\ufffd`), determinism test, and exact/normalized token agreement scoring. |
+| **Benchmark Harness & Guard** | **IMPLEMENTED** | Latency, throughput, TTFT, and ITL percentiles calculation. `BenchmarkGuard` validates MAD variability and environment drift. |
+| **Reproducible Artifact Builder** | **IMPLEMENTED** | Atomic POSIX directory commits, canonical JSON serialization, secret scanner, and SHA256 detached checksums. |
+| **Autonomous AI Engineer** | **IMPLEMENTED** | Bounded autonomous agent (`BASE_PREPARATION`) operating under strict budget bounds (attempts, timeout, disk usage). |
+| **Optimization Lab** | **IMPLEMENTED** | Multi-candidate recipe exploration (BF16, FP16, FP32, TorchCompile) evaluated against immutable baselines. |
+| **FastAPI Backend & Orchestrator** | **IMPLEMENTED** | Async job queue (SQLite WAL mode), Server-Sent Events (SSE) live streaming, directory locking, and crash recovery. |
+| **Modern Web Application** | **IMPLEMENTED** | Single-page UI (React 18, TypeScript, Tailwind CSS) with real-time SSE event viewer, hardware telemetry, and URL hash routing. |
+| **Unified CLI** | **IMPLEMENTED** | `rocmhub` command line interface covering all core domains with semantic exit codes. |
+| **Automated Verification Pipeline** | **IMPLEMENTED** | 368 Pytest unit tests, Ruff, Mypy, fresh environment wheel smoke test, and Google Chrome E2E browser automation. |
+| **Physical AMD Hardware Execution** | **TARGET / PENDING** | Physical `/dev/kfd` kernel ioctl calls, HIP memory allocation, and kernel execution on physical AMD silicon **have not yet been executed**. |
+
+---
+
+## Current Hardware Status & Target Milestone
+
+### Current Host Testing
+- **Development & Local Verification**: Verified on Apple Silicon Mac (macOS Darwin arm64) in diagnostic and dry-run modes (`NO_ACCELERATOR`, `CONFIG_ONLY`, `NOT_MEASURED`).
+- **Continuous Integration**: Verified on Ubuntu Linux runners (Python 3.9–3.12, Node 20) without GPU accelerators.
+- **Safety Invariant**: Under non-AMD hosts, the tool gracefully degrades. It **never** downloads weights unexpectedly, **never** launches unverified inference, and **never** generates fake performance numbers.
+
+### Target First AMD Run
+The primary target configuration prepared for the initial physical hardware validation milestone:
+- **Target GPU**: AMD Radeon RX 7900 XTX (24 GB VRAM)
+- **Target Architecture**: `gfx1100` (RDNA 3)
+- **Host OS**: Ubuntu 22.04 LTS / 24.04 LTS (Linux kernel 6.x)
+- **ROCm Stack**: ROCm 6.2+
+- **PyTorch**: Official PyTorch ROCm build (`torch.version.hip` active)
+- **Target Model**: `Qwen/Qwen2.5-0.5B-Instruct` (FP16)
+
+Detailed preflight verification and step-by-step instructions for physical execution are documented in [FIRST_AMD_RUN.md](FIRST_AMD_RUN.md).
+
+---
+
+## Quick Start
+
+### 1. Clone & Setup Python Environment
 
 ```bash
+git clone <repository-url>
+cd ROCmHub
+
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,test]"
 ```
 
-### Frontend Setup
+### 2. Verify Installation
 
 ```bash
-cd frontend
-npm install
+# Check version (0.1.0)
+rocmhub --version
+
+# Run hardware and environment doctor
+rocmhub doctor
 ```
 
-### Running the Web Platform
+### 3. Safe No-GPU Workflow (Mac / CPU / Laptop)
 
-Start the backend API server:
+All of the following commands run safely without requiring an AMD GPU or downloading model weight tensors:
+
+```bash
+# 1. Inspect model metadata and resolve immutable commit SHA
+rocmhub inspect Qwen/Qwen2.5-0.5B-Instruct
+
+# 2. Forge a deterministic build in CONFIG_ONLY mode (no weights downloaded)
+rocmhub forge build Qwen/Qwen2.5-0.5B-Instruct --output-dir builds/qwen2.5 --no-weights
+
+# 3. Dry-run verify the generated launcher without executing subprocess
+rocmhub forge execute builds/qwen2.5 --dry-run
+
+# 4. Dry-run verify benchmark preflight (returns exit code 2: NO_ACCELERATOR)
+rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
+
+# 5. Run the automated interactive demo tour
+python3 scripts/mvp_demo_tour.py
+```
+
+### 4. Launch Local Web Platform
+
+Start the local FastAPI backend API server:
 ```bash
 rocmhub serve --host 127.0.0.1 --port 8000
 ```
 
-In a separate terminal, launch the frontend development server:
+In a separate terminal, start the frontend web development server:
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 
@@ -72,68 +133,69 @@ Open `http://localhost:5173` in your browser to access the ROCmHub workspace.
 
 ---
 
-## Running Tests
+## Repository Structure
 
-### Backend Tests & Verification
+```text
+ROCmHub/
+├── src/rocmhub/
+│   ├── models/        # Model source adapters, Hugging Face metadata inspection, immutable commit SHA resolution.
+│   ├── hardware/      # Environment observation, /dev/kfd driver check, ROCm stack and GPU detection.
+│   ├── runners/       # Process execution runners and isolated Hugging Face inference runtime adapters.
+│   ├── forge/         # Deterministic build planning, materialization, recipe templates, and standalone launcher.
+│   ├── validation/    # Output correctness gating, determinism, token agreement, and quality retention evaluation.
+│   ├── benchmarks/    # Latency, throughput, TTFT, and ITL metrics calculation without synthetic numbers.
+│   ├── guard/         # Statistical reproducibility gate, Median Absolute Deviation (MAD), and health checks.
+│   ├── artifacts/     # Cryptographic hashing, secret scanning, tamper verification, and atomic artifact store.
+│   ├── engineer/      # Autonomous AI Engineer agent with budget bounds, tool execution, and trajectory reporting.
+│   ├── optimization/  # Multi-candidate exploration, compilation recipes, and baseline comparison engine.
+│   ├── server/        # FastAPI REST backend, SQLite job queue, SSE live streaming, and cooperative cancellation.
+│   ├── doctor.py      # System diagnostics checker (kernel, permissions, rocm-smi, torch.version.hip).
+│   └── cli/           # Unified command line interface (rocmhub ...).
+├── frontend/          # Modern responsive web application (React 18, TypeScript, Tailwind CSS, TanStack Query).
+├── tests/             # Comprehensive automated test suites (368+ unit, safety invariant, and API tests).
+├── scripts/           # Reproducible scenarios, fresh environment smoke tests, and Chrome E2E browser automation.
+├── examples/          # Declarative configuration examples (qwen2.5-0.5b-fp16.json).
+└── screenshots/       # Verified Google Chrome E2E browser acceptance screenshots.
+```
+
+---
+
+## Documentation Index
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Comprehensive technical architecture, design invariants, and module contracts.
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — Complete roadmap and implementation log across Phases 1–19.
+- [FIRST_AMD_RUN.md](FIRST_AMD_RUN.md) — Step-by-step guide for performing the first physical AMD GPU validation run.
+- [RELEASE_NOTES_0.1.0.md](RELEASE_NOTES_0.1.0.md) — Detailed overview of capabilities, testing boundaries, and limits for the 0.1.0 MVP.
+- [CHANGELOG.md](CHANGELOG.md) — Version history and changes following Keep a Changelog.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Developer setup, quality gates, and the Hardware Truthfulness rule.
+- [SECURITY.md](SECURITY.md) — Security policy and vulnerability disclosure procedures.
+- [LICENSE](LICENSE) — Apache License 2.0.
+
+---
+
+## Running Verification & Quality Gates
+
 ```bash
-# Run all unit tests
+# Run backend test suite (368+ tests)
 pytest
 
-# Linting and Type Checking
-ruff check src tests
+# Python linting and type checking
+ruff check src tests scripts
 mypy src tests/test_api.py
 
-# End-to-end integration smoke test
-python3 scripts/live_demo_smoke.py
-```
+# Package build & fresh virtual environment installation smoke test
+python -m pip install build && python -m build
+python3 scripts/fresh_install_smoke.py
 
-### Frontend Tests & Build
-```bash
-cd frontend
-npm test
-npm run build
-```
+# Frontend tests and production build
+cd frontend && npm test -- --run && npm run build && cd ..
 
-### Real Browser E2E Acceptance Test
-```bash
-# Runs full end-to-end user scenario across desktop and mobile in Google Chrome
+# Google Chrome real browser E2E acceptance test
 node scripts/browser_e2e.js
 ```
 
 ---
 
-## CLI Usage
-
-```bash
-# Display version
-rocmhub --version
-
-# Diagnostics & environment doctor
-rocmhub doctor
-rocmhub env
-
-# Inspect model metadata
-rocmhub inspect Qwen/Qwen2.5-0.5B-Instruct
-
-# Forge a reproducible AMD execution build
-rocmhub forge build Qwen/Qwen2.5-0.5B-Instruct --output-dir builds/qwen2.5
-
-# Dry-run or execute inference build on AMD ROCm GPU
-rocmhub forge execute builds/qwen2.5 --dry-run
-rocmhub forge execute builds/qwen2.5 --prompt "Hello AMD" --max-new-tokens 32
-
-# Run benchmark pipeline (or safe dry-run on non-AMD systems)
-rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
-rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
-
-# Start local API server
-rocmhub serve --host 127.0.0.1 --port 8000
-```
-
-See [FIRST_AMD_RUN.md](FIRST_AMD_RUN.md) for full step-by-step AMD deployment guidance.
-
----
-
 ## License
 
-Apache License 2.0. See LICENSE for details.
+ROCmHub is licensed under the [Apache License 2.0](LICENSE).

@@ -744,7 +744,7 @@ RocmHub/
 3. **Autonomous AI Engineer MVP**: *(Completed in Phase 11)* Autonomous preparation of open models on AMD GPUs with bounded execution loop, security boundary, and deterministic fallback.
 4. **Optimization Engine**: *(Completed in Phase 12)* Automated candidate generation, compilation, execution, and objective comparison against immutable baselines.
 5. **Backend API & Job Orchestration**: *(Completed in Phase 13)* Local FastAPI backend, asynchronous job manager with SQLite persistence, SSE streaming, and directory locking.
-6. **Frontend MVP**: *(Completed in Phase 14)* Production-grade React SPA with live SSE streaming, model inspection, Forge studio, AI Engineer workspace, and Optimization Lab.
+6. **Frontend MVP**: *(Completed in Phase 14)* Responsive React SPA with live SSE streaming, model inspection, Forge studio, AI Engineer workspace, and Optimization Lab.
 7. **Verified Badge / Gate**: *(Phase 15)* Platform-level certification gate combining correctness PASS, quality retention threshold, and reproducibility PASS.
 8. **Alternative Runtimes**:
    - `VLLMRunner`: High-throughput PagedAttention / vLLM ROCm runner.

@@ -68,6 +68,20 @@ def execute_job(
         return (res[0], res[1], res[2], res[3], res[4], res[5], res[6])
 
     except Exception as exc:
+        # A cancellation can race with a blocking domain call that fails while the
+        # cancellation signal is being delivered. Preserve the user's terminal
+        # intent instead of overwriting it with an unrelated transport failure.
+        if cancellation_event.is_set():
+            emit("CANCELLATION", "CANCELLED", "Job cancelled during execution", "JOB_CANCELLED", None)
+            return (
+                JobStatus.CANCELLED,
+                None,
+                output_dir_str,
+                None,
+                "Job cancelled by user request",
+                "JOB_CANCELLED",
+                None,
+            )
         logger.exception("Job %s failed with exception", job_id)
         err_msg = str(exc)
         err_code = getattr(exc, "error_code", "INTERNAL_ERROR")
@@ -221,7 +235,9 @@ def _execute_optimization(
     max_candidates = request_data.get("max_candidates") or 3
     max_execution_time = float(request_data.get("timeout_seconds") or 600)
     allow_full_weights = request_data.get("allow_full_weights", False)
-    output_dir_str = request_data.get("output_dir") or str(Path("optimizations") / model_id.replace("/", "--"))
+    output_dir_str = request_data.get("output_dir") or str(
+        Path("optimizations") / model_id.replace("/", "--") / job_id
+    )
 
     request = OptimizationRequest(
         model_id=model_id,

@@ -192,29 +192,25 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
   return (
     <div className="page-fade">
       {/* ── HERO ─────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden border-b border-surface-border">
+      <div className="relative overflow-hidden border-b hairline min-h-[290px] flex items-center">
         <div
           className="absolute inset-0 flex items-center justify-end opacity-25 pointer-events-none"
           style={{ overflow: 'hidden' }}
         >
-          <img src={aiEngineerHeroImg} alt="" className="h-full max-h-[200px] mr-12 opacity-80" />
+          <img src={aiEngineerHeroImg} alt="" className="h-[280px] mr-12 opacity-70" />
         </div>
-        <div className="absolute inset-0 hero-overlay" />
-        <div className="relative z-10 px-8 sm:px-10 py-8">
-          <p className="text-xs font-mono font-medium text-violet-400/90 uppercase tracking-wider mb-1.5">
-            Autonomous Preparation
-          </p>
-          <h1 className="text-2xl font-bold tracking-tight text-white mb-1">AI Engineer</h1>
-          <p className="text-sm text-content-secondary">
-            Autonomous model preparation for AMD hardware.
-          </p>
+        <div className="absolute inset-0 bg-gradient-to-r from-[#09090b] via-[#09090b]/95 to-transparent" />
+        <div className="relative z-10 page-shell py-12">
+          <p className="eyebrow mb-5">Intelligent model preparation</p>
+          <h1 className="page-title">Tell us the outcome.<br/><span className="text-zinc-500">Engineer the path.</span></h1>
+          <p className="text-base text-zinc-500 mt-5 max-w-xl">Set an objective and let ROCmHub inspect, plan, and recommend the safest path for your model.</p>
         </div>
       </div>
 
-      <div className="px-8 sm:px-10 py-7 space-y-6 max-w-5xl">
+      <div className="page-shell py-10 space-y-8">
         {/* ── OBJECTIVE SELECTION ──────────────────────────────────── */}
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-content-primary">What's your goal?</h2>
+          <h2 className="text-2xl font-semibold tracking-[-.03em]">What do you want to accomplish?</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {OBJECTIVES.map((obj) => {
               const isSelected = objective === obj.id;
@@ -224,21 +220,21 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   key={obj.id}
                   type="button"
                   onClick={() => setObjective(obj.id)}
-                  className={`p-4 rounded-xl border text-left transition-all ${
+                  className={`p-6 min-h-[190px] rounded-2xl border text-left transition-all ${
                     isSelected
-                      ? 'bg-violet-500/10 border-violet-500/40 shadow-sm'
+                      ? 'bg-red-500/[.08] border-red-500/40 shadow-sm'
                       : 'card hover:border-zinc-600 hover:bg-surface-elevated'
                   }`}
                 >
-                  <div className={`mb-2 ${isSelected ? 'text-violet-400' : 'text-content-muted'}`}>
+                  <div className={`mb-8 ${isSelected ? 'text-red-400' : 'text-content-muted'}`}>
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-content-primary' : 'text-content-secondary'}`}>
-                    {obj.label}
+                    {obj.label.replace('Base Preparation','Prepare this model').replace('Max Throughput','Optimize throughput').replace('Min Latency','Reduce latency').replace('Full Preparation','Analyze compatibility')}
                   </div>
                   <p className="text-[11px] text-content-muted leading-relaxed">{obj.desc}</p>
                   {isSelected && (
-                    <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-violet-500/50 to-transparent rounded" />
+                    <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-red-500/50 to-transparent rounded" />
                   )}
                 </button>
               );
@@ -247,7 +243,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         </div>
 
         {/* ── MODEL + LAUNCH ──────────────────────────────────────── */}
-        <div className="card p-5 space-y-4">
+        <div className="focus-panel p-6 md:p-8 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-content-muted">Model ID</label>
@@ -318,12 +314,12 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
         {/* ── ACTIVE SESSION ──────────────────────────────────────── */}
         {activeJob && (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {/* Session header */}
-            <div className="card p-5">
+            <div className="card p-5 order-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-semibold text-content-primary">Session in Progress</h3>
+                  <h3 className="text-sm font-semibold text-content-primary">{isRunning ? 'Engineer at work' : 'Session record'}</h3>
                   <span className="text-[11px] font-mono text-content-muted bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
                     {activeJob.job_id}
                   </span>
@@ -383,13 +379,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
             {/* ── RESULT ──────────────────────────────────────────── */}
             {jobResult && (
-              <div className="card p-5 space-y-4">
+              <div className="card p-5 space-y-4 order-1">
                 {/* Completion header */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-surface-border">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-sm font-semibold text-emerald-400">
-                      Agent Session Finished — Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}
+                      Recommendation ready
                     </span>
                   </div>
                   <span className="text-[11px] text-content-muted font-mono">
@@ -421,13 +417,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                     <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
                       <div className="text-[11px] text-content-muted mb-1">Goal</div>
                       <div className="text-xs font-bold text-content-primary">
-                        {selectedObj?.label || objective}
+                        {(selectedObj?.label || objective).replace('Base Preparation', 'Prepare this model').replace('Max Throughput', 'Optimize throughput').replace('Min Latency', 'Reduce latency').replace('Full Preparation', 'Analyze compatibility')}
                       </div>
                     </div>
                     <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
-                      <div className="text-[11px] text-content-muted mb-1">Build</div>
+                      <div className="text-[11px] text-content-muted mb-1">Preparation</div>
                       <div className="text-xs font-bold text-emerald-400">
-                        {jobResult.result.build_manifest?.status || 'CONFIG_ONLY'}
+                        {(jobResult.result.build_manifest?.status || jobResult.domain_status) === 'CONFIG_ONLY' ? 'Plan ready' : (jobResult.result.build_manifest?.status || jobResult.domain_status || 'Ready')}
                       </div>
                     </div>
                   </div>
@@ -441,7 +437,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                       {jobResult.result.reasons.map((reason: string, idx: number) => (
                         <li key={idx} className="flex items-start gap-2 text-xs text-content-secondary">
                           <span className="text-accent-red mt-0.5 shrink-0">›</span>
-                          <span className="leading-relaxed">{reason}</span>
+                          <span className="leading-relaxed">{reason.replace('Model configuration prepared in CONFIG_ONLY mode (weights not materialized). Real AMD execution was not performed.', 'Configuration is ready. Continue on a ROCm host for weight materialization and hardware validation.')}</span>
                         </li>
                       ))}
                     </ul>

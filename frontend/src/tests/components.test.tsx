@@ -103,14 +103,12 @@ describe('Common Components', () => {
       />
     );
 
-    // Product hero
-    expect(screen.getByText('Prepare AI Models')).toBeInTheDocument();
+    // Product-first hero and truthful environment context
+    expect(screen.getByText('From model to')).toBeInTheDocument();
+    expect(screen.getByText(/Hardware measurement on a ROCm host/)).toBeInTheDocument();
 
-    // Hardware notice (CONFIG ONLY mode shown)
-    expect(screen.getByText(/CONFIG ONLY mode/)).toBeInTheDocument();
-
-    // Jobs table
-    expect(screen.getByText('job_abc')).toBeInTheDocument();
-    expect(screen.getByText('Qwen/Qwen2.5-0.5B-Instruct')).toBeInTheDocument();
+    // Recent work is presented as a continuation card, not an admin table
+    expect(screen.getByText('Forge build')).toBeInTheDocument();
+    expect(screen.getByText('Qwen2.5-0.5B-Instruct')).toBeInTheDocument();
   });
 });

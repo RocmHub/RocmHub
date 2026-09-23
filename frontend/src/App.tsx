@@ -94,7 +94,7 @@ export const App: React.FC = () => {
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-background text-content-primary flex flex-col">
+      <div className="h-screen app-surface text-content-primary flex flex-col overflow-hidden">
         <Navbar
           health={health ?? null}
           isLoading={isLoadingHealth}
@@ -112,7 +112,7 @@ export const App: React.FC = () => {
           />
 
           {/* Main content — full remaining width, each view manages its own max-width */}
-          <main className="flex-1 overflow-y-auto bg-background">
+          <main className="flex-1 overflow-y-auto">
             {activeTab === 'dashboard' && (
               <DashboardView
                 health={health ?? null}

@@ -32,11 +32,16 @@ export const App: React.FC = () => {
   });
   const [selectedJobId, setSelectedJobId] = useState<string | null>(getInitialJobId);
 
-  const switchTab = (tab: NavTab) => {
+  const navigateTo = (tab: NavTab) => {
     setActiveTab(tab);
     if (typeof window !== 'undefined' && window.location.hash !== `#${tab}`) {
       window.location.hash = tab;
     }
+  };
+
+  const switchTab = (tab: NavTab) => {
+    setSelectedJobId(null);
+    navigateTo(tab);
   };
 
   useEffect(() => {
@@ -72,6 +77,7 @@ export const App: React.FC = () => {
 
   const handleSelectModelForForge = (modelId: string, revision?: string) => {
     setSelectedModelForForge({ modelId, revision: revision || 'main' });
+    setSelectedJobId(null);
     switchTab('forge');
   };
 
@@ -79,11 +85,11 @@ export const App: React.FC = () => {
     setSelectedJobId(jobId);
     const job = jobsList?.items.find((j) => j.job_id === jobId);
     if (job?.job_type === 'ENGINEER') {
-      switchTab('engineer');
+      navigateTo('engineer');
     } else if (job?.job_type === 'OPTIMIZATION') {
-      switchTab('optimization');
+      navigateTo('optimization');
     } else {
-      switchTab('forge');
+      navigateTo('forge');
     }
   };
 

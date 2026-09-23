@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Info, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -37,13 +37,19 @@ const DURATIONS: Record<ToastType, number> = { success: 4000, error: 7000, warni
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
+  useEffect(() => {
+    const clearOnNavigation = () => setToasts([]);
+    window.addEventListener('hashchange', clearOnNavigation);
+    return () => window.removeEventListener('hashchange', clearOnNavigation);
+  }, []);
+
   const remove = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
   const push = useCallback((msg: string, type: ToastType) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setToasts(prev => [...prev.slice(-4), { id, type, message: msg }]);
+    setToasts([{ id, type, message: msg }]);
     setTimeout(() => remove(id), DURATIONS[type]);
   }, [remove]);
 

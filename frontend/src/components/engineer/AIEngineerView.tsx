@@ -72,6 +72,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
   const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -128,6 +129,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
   const handleLaunch = async () => {
     setIsStarting(true);
+    setLaunchError(null);
     setJobEvents([]);
     setJobResult(null);
 
@@ -170,7 +172,9 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         },
       });
     } catch (err: any) {
-      toast.error(`Session launch failed: ${err.message}`);
+      const message = `Session launch failed: ${err.message}`;
+      setLaunchError(message);
+      toast.error(message);
     } finally {
       setIsStarting(false);
     }
@@ -181,13 +185,20 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
     try {
       await cancelJob(activeJob.job_id);
       setActiveJob((prev) => (prev ? { ...prev, status: 'CANCELLED' } : prev));
+      setLaunchError('The session was cancelled. Your objective and model are preserved for retry.');
     } catch (e: any) {
       toast.error(`Cancel failed: ${e.message}`);
     }
   };
 
   const isRunning = activeJob?.status === 'RUNNING' || activeJob?.status === 'QUEUED';
+  const failed = jobResult?.job_status === 'FAILED' || jobResult?.domain_status === 'FAILED' || jobResult?.result?.status === 'FAILED' || activeJob?.status === 'FAILED' || activeJob?.domain_status === 'FAILED';
+  const cancelled = jobResult?.job_status === 'CANCELLED' || activeJob?.status === 'CANCELLED';
   const selectedObj = OBJECTIVES.find(o => o.id === objective);
+  const activitySteps = ['Inspecting model', 'Checking environment', 'Preparing plan', 'Evaluating result', 'Finalizing recommendation'];
+  const activeActivity = Math.min(4, Math.max(0, Math.floor(jobEvents.length / 2)));
+  const rawFailure = String(jobResult?.error_message || jobResult?.result?.errors_encountered?.[0] || jobResult?.result?.reasons?.[0] || launchError || 'The engineer stopped before producing a verified recommendation.');
+  const failureMessage = rawFailure.includes('MODEL_NOT_FOUND') ? 'The model could not be resolved. Check repository access and the model ID, then retry.' : rawFailure;
 
   return (
     <div className="page-fade">
@@ -250,7 +261,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               <input
                 type="text"
                 value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
+                onChange={(e) => { setModelId(e.target.value); setLaunchError(null); setActiveJob(null); setJobResult(null); setJobEvents([]); }}
                 className="input-field font-mono text-xs"
                 placeholder="org/model-name"
               />
@@ -258,7 +269,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             <div className="flex items-end gap-3">
               <button
                 onClick={handleLaunch}
-                disabled={isStarting || isRunning}
+                disabled={isStarting || isRunning || !modelId.trim()}
                 className="btn-primary flex-1"
               >
                 {isStarting ? (
@@ -312,9 +323,22 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
           </div>
         </div>
 
+        {launchError && !jobResult && (
+          <div className="p-5 rounded-2xl bg-red-500/[.07] border border-red-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex gap-3"><AlertCircle className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">Engineer needs your attention</div><p className="text-xs text-red-300/70 mt-1">{launchError}</p></div></div>
+            <button onClick={handleLaunch} disabled={!modelId.trim()} className="btn-secondary shrink-0"><RotateCcw className="w-3.5 h-3.5"/>Retry session</button>
+          </div>
+        )}
+
         {/* ── ACTIVE SESSION ──────────────────────────────────────── */}
         {activeJob && (
           <div className="flex flex-col gap-4">
+            {isRunning && !jobResult && (
+              <div className="focus-panel p-6 md:p-8 order-1" aria-label="Engineer activity">
+                <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Engineer activity</div><h3 className="text-xl font-semibold">Building a recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
+                <div className="grid sm:grid-cols-5 gap-2 mt-7">{activitySteps.map((step,index)=><div key={step} className={`p-4 rounded-xl border ${index<activeActivity?'bg-emerald-500/[.05] border-emerald-500/15':index===activeActivity?'bg-red-500/[.06] border-red-500/25':'bg-white/[.02] hairline'}`}><div className={`w-2 h-2 rounded-full mb-5 ${index<activeActivity?'bg-emerald-400':index===activeActivity?'bg-red-400 animate-pulse':'bg-zinc-700'}`}/><div className={`text-xs leading-snug ${index<=activeActivity?'text-zinc-200':'text-zinc-600'}`}>{step}</div></div>)}</div>
+              </div>
+            )}
             {/* Session header */}
             <div className="card p-5 order-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
@@ -378,7 +402,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             </div>
 
             {/* ── RESULT ──────────────────────────────────────────── */}
-            {jobResult && (
+            {jobResult && (failed || cancelled) && (
+              <div className="focus-panel p-6 md:p-8 space-y-5 order-1">
+                <div className="flex items-start gap-4"><div className="w-11 h-11 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0"><AlertCircle className="w-5 h-5"/></div><div><div className="eyebrow mb-2">Recommendation unavailable</div><h3 className="text-xl font-semibold">{cancelled ? 'Session cancelled' : 'We couldn’t complete this session'}</h3><p className="text-sm text-zinc-500 mt-2 leading-relaxed">{failureMessage}</p>{rawFailure!==failureMessage&&<details className="mt-3"><summary className="text-xs text-zinc-600 cursor-pointer">Technical details</summary><p className="font-mono text-[10px] text-zinc-600 mt-2 break-all">{rawFailure}</p></details>}</div></div>
+                <div className="flex flex-wrap justify-end gap-2 border-t hairline pt-5"><button onClick={()=>{setActiveJob(null);setJobResult(null);setJobEvents([]);setLaunchError(null)}} className="btn-ghost">Edit objective</button><button onClick={handleLaunch} className="btn-primary"><RotateCcw className="w-3.5 h-3.5"/>Retry session</button></div>
+              </div>
+            )}
+            {jobResult && !failed && !cancelled && (
               <div className="card p-5 space-y-4 order-1">
                 {/* Completion header */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-surface-border">

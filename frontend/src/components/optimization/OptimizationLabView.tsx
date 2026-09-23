@@ -29,6 +29,10 @@ const STRATEGIES = [
   { id: 'fp32', label: 'FP32', desc: 'Single precision · reference' },
 ];
 
+const friendlyError = (message: string) => message.includes('MODEL_NOT_FOUND')
+  ? 'The model could not be resolved. Check repository access and the model ID, then retry.'
+  : message;
+
 export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ selectedJobId, onJobCreated }) => {
   const toast = useToast();
 
@@ -40,6 +44,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -104,6 +109,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
   const handleLaunch = async () => {
     setIsStarting(true);
+    setLaunchError(null);
     setJobEvents([]);
     setJobResult(null);
 
@@ -144,7 +150,9 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
         },
       });
     } catch (err: any) {
-      toast.error(`Optimization failed: ${err.message}`);
+      const message = `Optimization failed: ${err.message}`;
+      setLaunchError(message);
+      toast.error(message);
     } finally {
       setIsStarting(false);
     }
@@ -155,12 +163,16 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
     try {
       await cancelJob(activeJob.job_id);
       setActiveJob((prev) => (prev ? { ...prev, status: 'CANCELLED' } : prev));
+      setLaunchError('The experiment was cancelled. The study design is preserved for retry.');
     } catch (e: any) {
       toast.error(`Cancel failed: ${e.message}`);
     }
   };
 
   const isRunning = activeJob?.status === 'RUNNING' || activeJob?.status === 'QUEUED';
+  const failed = jobResult?.job_status === 'FAILED' || jobResult?.domain_status === 'FAILED' || jobResult?.result?.status === 'FAILED' || activeJob?.status === 'FAILED' || activeJob?.domain_status === 'FAILED';
+  const cancelled = jobResult?.job_status === 'CANCELLED' || activeJob?.status === 'CANCELLED';
+  const failureDetail = jobResult?.error_message || launchError || 'The experiment stopped before baseline and candidate preparation completed.';
 
   return (
     <div className="page-fade">
@@ -189,7 +201,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
               <input
                 type="text"
                 value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
+                onChange={(e) => { setModelId(e.target.value); setLaunchError(null); setActiveJob(null); setJobResult(null); setJobEvents([]); }}
                 className="input-field font-mono text-xs"
                 placeholder="org/model-name"
               />
@@ -253,7 +265,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
             </div>
             <button
               onClick={handleLaunch}
-              disabled={isStarting || isRunning}
+              disabled={isStarting || isRunning || !modelId.trim()}
               className="btn-primary"
             >
               {isStarting ? (
@@ -264,6 +276,13 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
             </button>
           </div>
         </div>
+
+        {launchError && !jobResult && (
+          <div className="p-5 rounded-2xl bg-red-500/[.07] border border-red-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex gap-3"><Info className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">Experiment needs attention</div><p className="text-xs text-red-300/70 mt-1">{launchError}</p></div></div>
+            <button onClick={handleLaunch} disabled={!modelId.trim()} className="btn-secondary shrink-0">Retry experiment</button>
+          </div>
+        )}
 
         {/* ── ACTIVE JOB ──────────────────────────────────────────── */}
         {activeJob && (
@@ -284,6 +303,12 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 </button>
               )}
             </div>
+
+            {isRunning && (
+              <div className="grid md:grid-cols-3 gap-3" aria-label="Experiment progress">
+                {[{name:'Baseline',strategy:'FP16'},...strategies.slice(0,2).map((strategy,index)=>({name:`Candidate ${String.fromCharCode(65+index)}`,strategy:strategy.toUpperCase()}))].map((lane,index)=><div key={lane.name} className="p-5 rounded-2xl bg-white/[.025] border hairline"><div className="flex items-center justify-between"><span className="text-sm font-semibold">{lane.name}</span><span className="font-mono text-[10px] text-zinc-600">{lane.strategy}</span></div><div className="h-1.5 rounded-full bg-white/[.05] mt-7 overflow-hidden"><div className={`h-full bg-emerald-400/80 animate-pulse ${index===0?'w-4/5':index===1?'w-3/5':'w-2/5'}`}/></div><div className="text-[11px] text-zinc-500 mt-3">{index===0?'Preparing reference':'Preparing candidate'}</div></div>)}
+              </div>
+            )}
 
             {/* Collapsed log */}
             <details>
@@ -313,7 +338,12 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                   </div>
                 </div>
 
+                {(failed || cancelled) && (
+                  <div className="p-6 rounded-2xl bg-amber-500/[.06] border border-amber-500/20 flex flex-col md:flex-row md:items-center justify-between gap-5"><div><div className="text-lg font-semibold">{cancelled?'Experiment cancelled':'No comparison was produced'}</div><p className="text-sm text-zinc-500 mt-2 max-w-2xl leading-relaxed">{friendlyError(failureDetail)}</p>{friendlyError(failureDetail)!==failureDetail&&<details className="mt-3"><summary className="text-[11px] text-zinc-500 cursor-pointer">Technical details</summary><p className="mt-2 max-w-2xl font-mono text-[10px] text-zinc-600 break-all">{failureDetail}</p></details>}</div><button onClick={handleLaunch} className="btn-secondary shrink-0">Retry experiment</button></div>
+                )}
+
                 {/* Hardware truth notice — prominent */}
+                {!failed && !cancelled && <>
                 <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-elevated border border-surface-border text-xs">
                   <Info className="w-4 h-4 text-content-muted shrink-0 mt-0.5" />
                   <p className="text-content-secondary leading-relaxed">
@@ -339,35 +369,35 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                     <table className="w-full text-left text-xs">
                       <thead className="border-b border-surface-border">
                         <tr>
-                          <th className="px-4 py-3 text-content-muted font-medium">Role</th>
-                          <th className="px-4 py-3 text-content-muted font-medium">Strategy</th>
-                          <th className="px-4 py-3 text-content-muted font-medium">Status</th>
-                          <th className="px-4 py-3 text-content-muted font-medium">Throughput</th>
-                          <th className="px-4 py-3 text-content-muted font-medium">TTFT</th>
-                          <th className="px-4 py-3 text-content-muted font-medium">Verdict</th>
+                          <th className="px-2 sm:px-4 py-3 text-content-muted font-medium">Role</th>
+                          <th className="px-2 sm:px-4 py-3 text-content-muted font-medium">Strategy</th>
+                          <th className="px-2 sm:px-4 py-3 text-content-muted font-medium">Status</th>
+                          <th className="hidden sm:table-cell px-4 py-3 text-content-muted font-medium">Throughput</th>
+                          <th className="hidden sm:table-cell px-4 py-3 text-content-muted font-medium">TTFT</th>
+                          <th className="hidden sm:table-cell px-4 py-3 text-content-muted font-medium">Verdict</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-surface-border">
                         {/* Baseline */}
                         <tr className="hover:bg-surface-elevated/40 transition-colors">
-                          <td className="px-4 py-3 font-semibold text-content-secondary">Baseline</td>
-                          <td className="px-4 py-3 font-mono text-content-primary uppercase">
+                          <td className="px-2 sm:px-4 py-3 font-semibold text-content-secondary">Baseline<div className="sm:hidden mt-1 text-[9px] font-normal text-content-muted">Reference metrics</div></td>
+                          <td className="px-2 sm:px-4 py-3 font-mono text-content-primary uppercase">
                             {jobResult.result?.baseline?.precision?.toUpperCase() || 'FP16'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 sm:px-4 py-3">
                             <DomainStatusTag status={jobResult.result?.baseline?.status || jobResult.domain_status || 'CONFIG_ONLY'} />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="hidden sm:table-cell px-4 py-3">
                             {jobResult.result?.baseline?.benchmark_result?.throughput_tokens_per_sec != null
                               ? <span className="font-mono">{Number(jobResult.result.baseline.benchmark_result.throughput_tokens_per_sec).toFixed(1)} tok/s</span>
                               : <DomainStatusTag status="NOT_MEASURED" />}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="hidden sm:table-cell px-4 py-3">
                             {jobResult.result?.baseline?.benchmark_result?.ttft_ms != null
                               ? <span className="font-mono">{Number(jobResult.result.baseline.benchmark_result.ttft_ms).toFixed(1)} ms</span>
                               : <DomainStatusTag status="NOT_MEASURED" />}
                           </td>
-                          <td className="px-4 py-3 text-content-muted font-mono text-[11px]">REFERENCE</td>
+                          <td className="hidden sm:table-cell px-4 py-3 text-content-muted font-mono text-[11px]">REFERENCE</td>
                         </tr>
 
                         {/* Candidates */}
@@ -377,23 +407,24 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                               const isBest = cand.candidate_id === jobResult.result?.best_candidate_id;
                               return (
                                 <tr key={cand.candidate_id || idx} className={`hover:bg-surface-elevated/40 transition-colors ${isBest ? 'bg-emerald-500/5' : ''}`}>
-                                  <td className="px-4 py-3 font-semibold text-content-primary font-mono">
+                                  <td className="px-2 sm:px-4 py-3 font-semibold text-content-primary font-mono break-all">
                                     {cand.candidate_id}
                                     {isBest && <span className="ml-2 text-[10px] text-emerald-400">★ Best</span>}
+                                    <div className="sm:hidden mt-1 text-[9px] font-normal text-content-muted break-normal">{cand.measured?'Measured candidate':'Metrics pending hardware'}</div>
                                   </td>
-                                  <td className="px-4 py-3 font-mono text-content-primary uppercase">{cand.strategy}</td>
-                                  <td className="px-4 py-3"><DomainStatusTag status={cand.status || 'CONFIG_ONLY'} /></td>
-                                  <td className="px-4 py-3">
+                                  <td className="px-2 sm:px-4 py-3 font-mono text-content-primary uppercase">{cand.strategy}</td>
+                                  <td className="px-2 sm:px-4 py-3"><DomainStatusTag status={cand.status || 'CONFIG_ONLY'} /></td>
+                                  <td className="hidden sm:table-cell px-4 py-3">
                                     {cand.benchmark_result?.throughput_tokens_per_sec != null
                                       ? <span className="font-mono">{Number(cand.benchmark_result.throughput_tokens_per_sec).toFixed(1)} tok/s</span>
                                       : <DomainStatusTag status="NOT_MEASURED" />}
                                   </td>
-                                  <td className="px-4 py-3">
+                                  <td className="hidden sm:table-cell px-4 py-3">
                                     {cand.benchmark_result?.ttft_ms != null
                                       ? <span className="font-mono">{Number(cand.benchmark_result.ttft_ms).toFixed(1)} ms</span>
                                       : <DomainStatusTag status="NOT_MEASURED" />}
                                   </td>
-                                  <td className="px-4 py-3 text-content-secondary font-mono text-[11px]">
+                                  <td className="hidden sm:table-cell px-4 py-3 text-content-secondary font-mono text-[11px]">
                                     {comp?.verdict || (cand.measured ? 'EVALUATED' : 'NOT_MEASURED')}
                                   </td>
                                 </tr>
@@ -414,6 +445,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                     </table>
                   </div>
                 </div>
+                </>}
               </div>
             )}
           </div>

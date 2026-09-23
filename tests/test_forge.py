@@ -965,6 +965,8 @@ class TestForgeExecutionReadiness:
             "load_time_seconds": 0.45,
             "generation_time_seconds": 0.20,
             "tokens_per_second": 80.0,
+            "is_hip": True,
+            "amd_gpu_used": True,
         })
         mock_proc.stderr = ""
 

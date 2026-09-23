@@ -47,6 +47,7 @@ from rocmhub.core.types import (
     ValidationRunResult,
     ValidationVerdict,
 )
+from rocmhub.doctor import DoctorCheck, DoctorReport, DoctorVerdict, ROCmDoctor
 from rocmhub.engineer import (
     AIEngineer,
     EngineerBudget,
@@ -60,6 +61,7 @@ from rocmhub.forge import (
     BuildStatus,
     BuildStepRecord,
     BuildStepSpec,
+    ExecutionResult,
     ForgeExecutor,
     ForgePlan,
     ForgePlanner,
@@ -175,4 +177,9 @@ __all__ = [
     "create_app",
     "ServerConfig",
     "JobManager",
+    "ROCmDoctor",
+    "DoctorReport",
+    "DoctorVerdict",
+    "DoctorCheck",
+    "ExecutionResult",
 ]

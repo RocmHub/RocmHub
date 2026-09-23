@@ -260,16 +260,41 @@ def main() -> int:
             sys.stderr.write("Install with: pip install torch transformers\\n")
         return 1
 
+    is_hip = bool(getattr(torch.version, "hip", None))
+    hip_version = getattr(torch.version, "hip", None)
+    torch_version = str(getattr(torch, "__version__", ""))
+    cuda_avail = bool(torch.cuda.is_available())
+
     device_str = args.device
-    if device_str == "cuda" and not torch.cuda.is_available():
-        if not args.json:
-            sys.stderr.write("WARNING: CUDA/HIP not available. Falling back to CPU.\\n")
+    device_fallback = False
+    if device_str.startswith("cuda") and not cuda_avail:
+        device_fallback = True
         device_str = "cpu"
+        if not args.json:
+            sys.stderr.write("WARNING: CUDA/HIP not available in PyTorch. Falling back to CPU.\\n")
+
+    actual_device_name = None
+    if cuda_avail and device_str.startswith("cuda"):
+        try:
+            actual_device_name = torch.cuda.get_device_name(0)
+        except Exception:
+            actual_device_name = None
+
+    is_amd_gpu = False
+    if actual_device_name:
+        dev_lower = actual_device_name.lower()
+        is_amd_gpu = any(k in dev_lower for k in ("amd", "radeon", "instinct", "gfx"))
+    if is_hip and cuda_avail and device_str.startswith("cuda"):
+        is_amd_gpu = True
 
     model_location = r"""{weights_path or model_id}"""
     if not args.json:
         print(f"Loading model: {model_id} (revision: {revision[:8] if len('{revision}') >= 8 else '{revision}'})")
         print(f"Device: {{device_str}}, Precision: {precision}")
+        if is_hip:
+            print(f"HIP Runtime: {{hip_version}} (PyTorch: {{torch_version}})")
+        if actual_device_name:
+            print(f"GPU Device: {{actual_device_name}}")
 
     dtype_map = {{
         "float16": torch.float16,
@@ -329,7 +354,9 @@ def main() -> int:
                 "status": "SUCCESS",
                 "model_id": "{model_id}",
                 "revision": "{revision}",
+                "device_requested": args.device,
                 "device": device_str,
+                "device_fallback": device_fallback,
                 "precision": "{precision}",
                 "prompt": args.prompt,
                 "generated_text": output_text,
@@ -337,6 +364,11 @@ def main() -> int:
                 "load_time_seconds": round(load_time, 4),
                 "generation_time_seconds": round(gen_time, 4),
                 "tokens_per_second": round(tps, 2),
+                "is_hip": is_hip,
+                "hip_version": hip_version,
+                "pytorch_version": torch_version,
+                "amd_gpu_used": is_amd_gpu,
+                "gpu_device_name": actual_device_name,
             }}
             print(json.dumps(res_payload))
         else:
@@ -345,7 +377,14 @@ def main() -> int:
         return 0
     except Exception as exc:
         if args.json:
-            print(json.dumps({{"status": "FAILED", "error": str(exc)}}))
+            print(json.dumps({{
+                "status": "FAILED",
+                "error": str(exc),
+                "is_hip": is_hip,
+                "hip_version": hip_version,
+                "pytorch_version": torch_version,
+                "amd_gpu_used": False,
+            }}))
         else:
             sys.stderr.write(f"Inference error: {{exc}}\\n")
         return 1

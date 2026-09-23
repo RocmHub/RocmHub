@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-09-23T06:40:14.607036+00:00",
+  "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+  "precision": "fp16",
+  "device_id": 0,
+  "live_amd_consent": false,
+  "stages": {
+    "stage_1_doctor": {
+      "status": "PASS",
+      "verdict": "NO_ACCELERATOR",
+      "summary": "No AMD ROCm GPU accelerator detected on this host (Darwin arm64). Diagnostic mode active.",
+      "amd_gpus_detected": 0,
+      "checks": [
+        {
+          "name": "os_platform",
+          "status": "INFO",
+          "message": "Darwin host detected (25.5.0, arm64). ROCmHub diagnostic & validation mode active. Native ROCm execution requires Linux.",
+          "details": {
+            "system": "Darwin",
+            "kernel": "25.5.0",
+            "arch": "arm64"
+          }
+        },
+        {
+          "name": "amd_hardware",
+          "status": "WARN",
+          "message": "No AMD GPU detected on host. Real GPU acceleration unavailable.",
+          "details": {
+            "total_gpus_detected": 0
+          }
+        },
+        {
+          "name": "kernel_kfd",
+          "status": "SKIPPED",
+          "message": "KFD driver check skipped on non-Linux host.",
+          "details": {}
+        },
+        {
+          "name": "rocm_stack",
+          "status": "WARN",
+          "message": "ROCm userspace stack not found (rocm-smi / /opt/rocm absent).",
+          "details": {
+            "rocm_path": "/opt/rocm",
+            "checked_paths": [
+              "/opt/rocm"
+            ]
+          }
+        },
+        {
+          "name": "pytorch_hip",
+          "status": "WARN",
+          "message": "PyTorch is not installed in the current environment.",
+          "details": {}
+        }
+      ]
+    },
+    "stage_2_inspect": {
+      "status": "PASS",
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "commit_sha": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "architecture": "Qwen2ForCausalLM",
+      "context_length": 32768,
+      "parameter_count": 494032768,
+      "weights_format": "safetensors"
+    },
+    "stage_3_capability": {
+      "status": "PASS",
+      "verdict": "NO_ACCELERATOR",
+      "reasons": [
+        {
+          "code": "NO_AMD_GPU",
+          "severity": "info",
+          "message": "No AMD GPU detected",
+          "evidence": {
+            "detected_gpus": 0
+          }
+        },
+        {
+          "code": "ROCM_NOT_DETECTED",
+          "severity": "info",
+          "message": "ROCm runtime was not detected",
+          "evidence": {
+            "rocm_version": null
+          }
+        },
+        {
+          "code": "HIP_NOT_DETECTED",
+          "severity": "info",
+          "message": "HIP runtime was not detected",
+          "evidence": {
+            "hip_version": null
+          }
+        },
+        {
+          "code": "TORCH_HIP_UNAVAILABLE",
+          "severity": "info",
+          "message": "PyTorch HIP backend is not available",
+          "evidence": {
+            "torch_version": "not_installed",
+            "torch_hip_available": false
+          }
+        }
+      ],
+      "warnings": [
+        "rocminfo tool not found or returned no output",
+        "amd-smi tool not found or returned no output",
+        "rocm-smi tool not found or returned no output"
+      ]
+    },
+    "stage_4_run": {
+      "status": "PASS",
+      "execution_status": "SKIPPED",
+      "is_dry_run": true,
+      "tokens_generated": null
+    },
+    "stage_5_validate": {
+      "status": "PASS",
+      "verdict": "NOT_MEASURED",
+      "correctness_passed": null
+    },
+    "stage_6_benchmark": {
+      "status": "PASS",
+      "benchmark_status": "NOT_MEASURED",
+      "throughput_tokens_per_sec": null
+    },
+    "stage_7_artifact_guard": {
+      "status": "PASS",
+      "artifact_id": "art-273591b0a7328735c96ae599",
+      "bundle_path": "/Users/netcars/Desktop/RocmHub/diagnostics/artifacts/art-273591b0a7328735c96ae599",
+      "guard_verdict": "NOT_MEASURED",
+      "reasons": [
+        "NO_BENCHMARK_EXECUTION"
+      ],
+      "file_count": 7
+    }
+  },
+  "verdict": "SUCCESS",
+  "error": null,
+  "duration_seconds": 0.88
+}

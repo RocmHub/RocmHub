@@ -83,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output detected environment as pure JSON.",
     )
 
+    # Command: doctor
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run comprehensive diagnostics on AMD GPU hardware, ROCm stack, kernel drivers, and PyTorch/HIP.",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output DoctorReport as pure JSON on stdout.",
+    )
+
     # Command: inspect
     inspect_parser = subparsers.add_parser(
         "inspect",
@@ -172,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output RunResult as pure JSON on stdout.",
+    )
+    run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perform preflight evaluation and plan inspection without downloading weights or running inference.",
     )
 
     # Command: benchmark
@@ -533,6 +549,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Output ExecutionResult as pure JSON on stdout.",
+    )
+    forge_exec_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate build structure and launch configuration without executing model.",
     )
 
     # Command: engineer
@@ -1097,6 +1118,43 @@ def _format_build_manifest(manifest: BuildManifest) -> str:
     return "\n".join(lines)
 
 
+def _format_doctor_report(report: Any) -> str:
+    """Format DoctorReport into human-readable diagnostic output."""
+    lines = [
+        "=" * 60,
+        "ROCmHub Doctor Diagnostics",
+        "=" * 60,
+        f"{'Verdict:':<20} {report.verdict.value}",
+        f"{'Summary:':<20} {report.summary}",
+        "",
+        "Diagnostic Checks:",
+        "-" * 60,
+    ]
+    for check in report.checks:
+        symbol = {
+            "PASS": "[PASS]",
+            "WARN": "[WARN]",
+            "FAIL": "[FAIL]",
+            "INFO": "[INFO]",
+            "SKIPPED": "[SKIP]",
+        }.get(check.status.value, f"[{check.status.value}]")
+        lines.append(f"  {symbol:<8} {check.name:<16} {check.message}")
+
+    lines.extend([
+        "-" * 60,
+        "Environment:",
+        f"  OS:           {report.environment.get('os')} ({report.environment.get('kernel')})",
+        f"  Architecture: {report.environment.get('architecture')}",
+        f"  Python:       {report.environment.get('python_version')}",
+        f"  PyTorch:      {report.environment.get('torch_version') or 'Not installed'}",
+        f"  ROCm Stack:   {report.environment.get('rocm_version') or 'Not detected'}",
+        f"  HIP Runtime:  {report.environment.get('hip_version') or 'Not detected'}",
+        f"  AMD GPUs:     {len(report.gpus)}",
+        "=" * 60,
+    ])
+    return "\n".join(lines)
+
+
 def _format_execution_result(result: ExecutionResult) -> str:
     """Format ExecutionResult into clean human-readable output."""
     lines = [
@@ -1105,9 +1163,17 @@ def _format_execution_result(result: ExecutionResult) -> str:
         "=" * 60,
         f"{'Execution Status:':<26} {result.status.value}",
         f"{'AMD Hardware Validated:':<26} {'yes' if result.amd_validated else 'no'}",
+        f"{'Dry Run:':<26} {'yes' if result.dry_run else 'no'}",
         f"{'Target Device:':<26} {result.device or 'unknown'}",
         f"{'Duration:':<26} {result.duration_seconds:.3f}s",
         f"{'Exit Code:':<26} {result.exit_code}",
+        "",
+        "Separated Facts:",
+        f"  - {'Process Success:':<24} {'yes' if result.process_success else 'no'}",
+        f"  - {'Inference Executed:':<24} {'yes' if result.inference_executed else 'no'}",
+        f"  - {'HIP Runtime Used:':<24} {'yes' if result.hip_runtime_used else 'no'}",
+        f"  - {'AMD GPU Used:':<24} {'yes' if result.amd_gpu_used else 'no'}",
+        f"  - {'Validation Passed:':<24} {'yes' if result.validation_passed is True else ('no' if result.validation_passed is False else 'not evaluated')}",
     ]
     if result.tokens_generated is not None:
         lines.append(f"{'Tokens Generated:':<26} {result.tokens_generated}")
@@ -1116,6 +1182,11 @@ def _format_execution_result(result: ExecutionResult) -> str:
     if result.generated_text:
         lines.append("-" * 60)
         lines.append(f"Generated Output:\n{result.generated_text}")
+    if result.validation_failures:
+        lines.append("-" * 60)
+        lines.append("Validation Failures:")
+        for vf in result.validation_failures:
+            lines.append(f"  * {vf}")
     if result.error_message:
         lines.append("-" * 60)
         lines.append(f"Notice / Error:\n{result.error_message}")
@@ -1143,6 +1214,27 @@ def main(args: Optional[List[str]] = None) -> int:
             return 0
         except Exception as exc:
             sys.stderr.write(f"Error during environment detection: {exc}\n")
+            return 1
+
+    if parsed_args.command == "doctor":
+        try:
+            from rocmhub.doctor import DoctorVerdict, ROCmDoctor
+
+            doctor = ROCmDoctor()
+            doc_report = doctor.run_diagnostics()
+            if parsed_args.json:
+                sys.stdout.write(doc_report.model_dump_json(indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_doctor_report(doc_report) + "\n")
+
+            if doc_report.verdict == DoctorVerdict.READY:
+                return 0
+            elif doc_report.verdict == DoctorVerdict.NO_ACCELERATOR:
+                return 2
+            else:
+                return 1
+        except Exception as exc:
+            sys.stderr.write(f"Error during doctor diagnostics: {exc}\n")
             return 1
 
     if parsed_args.command == "inspect":
@@ -1261,6 +1353,42 @@ def main(args: Optional[List[str]] = None) -> int:
                     EvaluationVerdict.UNKNOWN: 4,
                 }
                 return verdict_exit_codes.get(capability_report.verdict, 1)
+
+            # Dry-run requested: plan and prerequisites are verified; skip weight download and inference
+            if getattr(parsed_args, "dry_run", False):
+                dry_result = RunResult(
+                    status=ExecutionStatus.SKIPPED,
+                    runtime_name="pytorch_transformers_hip",
+                    model_id=model_spec.model_id,
+                    model_revision=model_spec.commit_sha,
+                    device_id=parsed_args.device,
+                    precision=parsed_args.precision,
+                    prompt=parsed_args.prompt,
+                    generated_text=None,
+                    input_tokens=None,
+                    generated_tokens=None,
+                    error="Dry-run requested: preflight verified. Inference and weights download skipped.",
+                    generation_params={"max_new_tokens": parsed_args.max_new_tokens, "do_sample": False, "dry_run": True},
+                )
+                if parsed_args.json:
+                    sys.stdout.write(dry_result.model_dump_json(indent=2) + "\n")
+                else:
+                    sys.stdout.write(
+                        "=" * 60 + "\n"
+                        "ROCmHub — Baseline Run Dry-Run Plan\n"
+                        "=" * 60 + "\n"
+                        f"{'Model ID:':<24} {model_spec.model_id}\n"
+                        f"{'Immutable Revision:':<24} {model_spec.commit_sha}\n"
+                        f"{'Architecture:':<24} {model_spec.architecture}\n"
+                        f"{'Preflight Verdict:':<24} {capability_report.verdict.value}\n"
+                        f"{'Target Device Index:':<24} {parsed_args.device}\n"
+                        f"{'Precision:':<24} {parsed_args.precision}\n"
+                        f"{'Max New Tokens:':<24} {parsed_args.max_new_tokens}\n"
+                        "-" * 60 + "\n"
+                        "Dry-run complete. Model weights were NOT downloaded and inference was NOT executed.\n"
+                        "=" * 60 + "\n"
+                    )
+                return 0
 
             # 5. Preflight is READY: proceed to execution with HuggingFaceRunner
             runner = HuggingFaceRunner()
@@ -1706,6 +1834,7 @@ def main(args: Optional[List[str]] = None) -> int:
                     max_new_tokens=parsed_args.max_new_tokens,
                     device=parsed_args.device,
                     timeout_seconds=parsed_args.timeout,
+                    dry_run=getattr(parsed_args, "dry_run", False),
                 )
                 if parsed_args.json:
                     sys.stdout.write(exec_res.model_dump_json(indent=2) + "\n")

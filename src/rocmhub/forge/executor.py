@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from rocmhub.core.errors import (
     BuildConflictError,
@@ -40,16 +40,28 @@ class ExecutionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     status: ExecutionStatus
-    amd_validated: bool
-    exit_code: int
-    duration_seconds: float
+    amd_validated: bool = False
+    exit_code: int = 0
+    duration_seconds: float = 0.0
+    device: Optional[str] = None
     generated_text: Optional[str] = None
     tokens_generated: Optional[int] = None
     tokens_per_second: Optional[float] = None
-    device: Optional[str] = None
     stdout: str = ""
     stderr: str = ""
     error_message: Optional[str] = None
+
+    # Separate factual observations (Phase 17 safety invariants)
+    process_success: bool = False
+    inference_executed: bool = False
+    hip_runtime_used: bool = False
+    amd_gpu_used: bool = False
+    gpu_device_name: Optional[str] = None
+    hip_version: Optional[str] = None
+    pytorch_version: Optional[str] = None
+    validation_passed: Optional[bool] = None
+    validation_failures: List[str] = Field(default_factory=list)
+    dry_run: bool = False
 
 
 def _sha256_file(path: Path) -> str:
@@ -370,23 +382,43 @@ class ForgeExecutor:
                     device="cuda",
                 )
                 dur = round(time.perf_counter() - t_exec, 4)
-                if exec_res.status == ExecutionStatus.SUCCESS:
+                if exec_res.status == ExecutionStatus.SUCCESS and exec_res.amd_validated:
                     records.append(
                         BuildStepRecord(
                             name="execute_inference",
                             status=StepStatus.SUCCESS,
                             duration_seconds=dur,
-                            message=f"AMD ROCm inference verified ({exec_res.tokens_generated} tokens generated).",
+                            message=f"AMD ROCm inference verified on {exec_res.gpu_device_name or 'AMD GPU'} ({exec_res.tokens_generated} tokens generated).",
                             details={
                                 "generated_text": exec_res.generated_text,
                                 "tokens_generated": exec_res.tokens_generated,
                                 "tokens_per_second": exec_res.tokens_per_second,
                                 "device": exec_res.device,
+                                "hip_runtime_used": exec_res.hip_runtime_used,
+                                "amd_gpu_used": exec_res.amd_gpu_used,
+                                "validation_passed": exec_res.validation_passed,
                             },
                         )
                     )
                     overall_status = BuildStatus.EXECUTED
                     amd_validated = True
+                elif exec_res.status == ExecutionStatus.SUCCESS and not exec_res.amd_validated:
+                    records.append(
+                        BuildStepRecord(
+                            name="execute_inference",
+                            status=StepStatus.SKIPPED,
+                            duration_seconds=dur,
+                            message="Inference executed but live AMD HIP hardware execution was not confirmed. Build remains PREPARED.",
+                            details={
+                                "device": exec_res.device,
+                                "hip_runtime_used": exec_res.hip_runtime_used,
+                                "amd_gpu_used": exec_res.amd_gpu_used,
+                                "validation_passed": exec_res.validation_passed,
+                            },
+                        )
+                    )
+                    overall_status = BuildStatus.PREPARED
+                    amd_validated = False
                 else:
                     records.append(
                         BuildStepRecord(
@@ -470,13 +502,20 @@ class ForgeExecutor:
         max_new_tokens: int = 32,
         device: str = "cuda",
         timeout_seconds: int = 120,
+        dry_run: bool = False,
     ) -> ExecutionResult:
         """Execute standalone launcher (run_inference.py) in build_dir and verify output.
 
-        Status semantics:
-        - If device='cuda' and no AMD GPU is detected: cleanly returns SKIPPED with amd_validated=False.
-        - If execution succeeds: returns SUCCESS with amd_validated=True (if run on AMD GPU) and token metrics.
-        - If execution crashes or times out: returns FAILED with error details.
+        Status and Safety semantics:
+        - If dry_run is True: validates launcher and configuration without spawning subprocess or executing model.
+        - If device='cuda' and no AMD GPU is detected: cleanly returns SKIPPED with amd_validated=False (no synthetic data).
+        - Separates factual observations:
+          * process_success (exit_code == 0)
+          * inference_executed (generated text present and tokens > 0)
+          * hip_runtime_used (HIP runtime verified in torch)
+          * amd_gpu_used (AMD GPU confirmed as execution device)
+          * validation_passed (output verified against corruption/invariants; NOT automatically True)
+        - amd_validated is ONLY True when ALL 4 facts (process_success, inference_executed, hip_runtime_used, amd_gpu_used) are True.
         """
         bdir = Path(build_dir).resolve()
         script_path = bdir / "run_inference.py"
@@ -487,6 +526,21 @@ class ForgeExecutor:
                 exit_code=1,
                 duration_seconds=0.0,
                 error_message=f"Launcher script not found at '{script_path}'.",
+            )
+
+        if dry_run:
+            return ExecutionResult(
+                status=ExecutionStatus.SKIPPED,
+                amd_validated=False,
+                exit_code=0,
+                duration_seconds=0.0,
+                device=device,
+                stdout="Dry-run: validated build structure and launch configuration. Subprocess execution skipped.",
+                process_success=True,
+                inference_executed=False,
+                hip_runtime_used=False,
+                amd_gpu_used=False,
+                dry_run=True,
             )
 
         report = self._observer.observe()
@@ -501,6 +555,11 @@ class ForgeExecutor:
                 device="cpu",
                 stdout="Skipped execution: no AMD ROCm GPU detected on this host. Build is PREPARED.",
                 error_message="No AMD ROCm GPU detected on host.",
+                process_success=True,
+                inference_executed=False,
+                hip_runtime_used=False,
+                amd_gpu_used=False,
+                dry_run=False,
             )
 
         cmd = [
@@ -544,18 +603,72 @@ class ForgeExecutor:
                         except Exception:
                             continue
 
-            if proc.returncode == 0 and parsed.get("status") == "SUCCESS":
+            process_success = (proc.returncode == 0)
+            has_success_status = (parsed.get("status") == "SUCCESS")
+            gen_text = parsed.get("generated_text")
+            tokens_gen = parsed.get("tokens_generated")
+            inference_executed = bool(
+                process_success
+                and has_success_status
+                and tokens_gen is not None
+                and tokens_gen > 0
+                and gen_text is not None
+            )
+
+            hip_runtime_used = bool(parsed.get("is_hip", False))
+            hip_ver = parsed.get("hip_version")
+            torch_ver = parsed.get("pytorch_version")
+            amd_gpu_used = bool(parsed.get("amd_gpu_used", False))
+            gpu_dev_name = parsed.get("gpu_device_name")
+            actual_device = parsed.get("device") or device
+
+            # Validation: technical correctness check on generated output
+            validation_failures: List[str] = []
+            validation_passed: Optional[bool] = None
+            if inference_executed:
+                from rocmhub.validation.correctness import NUMERIC_CORRUPTION_PATTERNS
+
+                text_str = str(gen_text)
+                if not text_str.strip():
+                    validation_failures.append("Generated output is empty or whitespace.")
+                for pat in NUMERIC_CORRUPTION_PATTERNS:
+                    if pat.search(text_str):
+                        validation_failures.append(f"Generated text contains corruption pattern ({pat.pattern}).")
+                if (tokens_gen or 0) <= 0:
+                    validation_failures.append("Token count is zero or negative.")
+                validation_passed = (len(validation_failures) == 0)
+
+            # Strict AMD validation requirement: process + inference + HIP runtime + AMD GPU device
+            amd_validated = bool(
+                process_success
+                and inference_executed
+                and hip_runtime_used
+                and amd_gpu_used
+                and (device == "cuda" or actual_device.startswith("cuda"))
+            )
+
+            if process_success and has_success_status:
                 res = ExecutionResult(
                     status=ExecutionStatus.SUCCESS,
-                    amd_validated=has_amd_gpu and (device == "cuda"),
+                    amd_validated=amd_validated,
                     exit_code=0,
                     duration_seconds=duration,
-                    generated_text=parsed.get("generated_text"),
-                    tokens_generated=parsed.get("tokens_generated"),
+                    generated_text=gen_text,
+                    tokens_generated=tokens_gen,
                     tokens_per_second=parsed.get("tokens_per_second"),
-                    device=parsed.get("device") or device,
+                    device=actual_device,
                     stdout=stdout,
                     stderr=stderr,
+                    process_success=True,
+                    inference_executed=inference_executed,
+                    hip_runtime_used=hip_runtime_used,
+                    amd_gpu_used=amd_gpu_used,
+                    gpu_device_name=gpu_dev_name,
+                    hip_version=hip_ver,
+                    pytorch_version=torch_ver,
+                    validation_passed=validation_passed,
+                    validation_failures=validation_failures,
+                    dry_run=False,
                 )
                 if res.amd_validated:
                     self._upgrade_manifest_to_executed(bdir, res)
@@ -570,6 +683,16 @@ class ForgeExecutor:
                     stdout=stdout,
                     stderr=stderr,
                     error_message=err_msg,
+                    process_success=process_success,
+                    inference_executed=False,
+                    hip_runtime_used=hip_runtime_used,
+                    amd_gpu_used=amd_gpu_used,
+                    gpu_device_name=gpu_dev_name,
+                    hip_version=hip_ver,
+                    pytorch_version=torch_ver,
+                    validation_passed=False,
+                    validation_failures=[err_msg] if err_msg else [],
+                    dry_run=False,
                 )
 
         except subprocess.TimeoutExpired:
@@ -580,6 +703,11 @@ class ForgeExecutor:
                 exit_code=-1,
                 duration_seconds=duration,
                 error_message=f"Execution timed out after {timeout_seconds} seconds.",
+                process_success=False,
+                inference_executed=False,
+                validation_passed=False,
+                validation_failures=[f"Timeout after {timeout_seconds}s"],
+                dry_run=False,
             )
         except Exception as exc:
             duration = round(time.perf_counter() - t0, 4)
@@ -589,6 +717,11 @@ class ForgeExecutor:
                 exit_code=-1,
                 duration_seconds=duration,
                 error_message=str(exc),
+                process_success=False,
+                inference_executed=False,
+                validation_passed=False,
+                validation_failures=[str(exc)],
+                dry_run=False,
             )
 
     def _upgrade_manifest_to_executed(self, build_dir: Path, result: ExecutionResult) -> None:
@@ -601,6 +734,12 @@ class ForgeExecutor:
                 data = json.load(f)
             data["status"] = BuildStatus.EXECUTED.value
             data["amd_validated"] = True
+            if result.hip_version:
+                data["hip_version"] = result.hip_version
+            if result.pytorch_version:
+                data["torch_version"] = result.pytorch_version
+            if result.validation_passed is not None:
+                data["validation_passed"] = result.validation_passed
             step_names = [s.get("name") for s in data.get("steps", [])]
             if "execute_inference" not in step_names:
                 data.setdefault("steps", []).append({
@@ -612,6 +751,9 @@ class ForgeExecutor:
                         "tokens_generated": result.tokens_generated,
                         "tokens_per_second": result.tokens_per_second,
                         "device": result.device,
+                        "hip_runtime_used": result.hip_runtime_used,
+                        "amd_gpu_used": result.amd_gpu_used,
+                        "validation_passed": result.validation_passed,
                     },
                 })
             with open(manifest_path, "w", encoding="utf-8") as f:

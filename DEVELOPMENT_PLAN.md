@@ -414,15 +414,21 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] Documentation alignment and removal of unverified/false claims across `README.md`, `DEVELOPMENT_PLAN.md`, and `ARCHITECTURE.md`.
 - **Verification**: Full test suite pass across backend and frontend, clean linting and typing.
 
-### Phase 17: AMD Execution Readiness (COMPLETED)
+### Phase 17: AMD Execution Readiness & Acceptance (COMPLETED)
 - [x] Direct launcher execution validation for materialized models on AMD ROCm hardware (`run_inference.py`).
 - [x] Structured JSON output mode (`--json`) added to standalone launcher template with execution metrics (load time, generation time, tokens per second, exit code).
 - [x] Safe subprocess execution harness (`ForgeExecutor.execute_build`) with stdout/stderr capture, timeout bounds, and exit code validation.
 - [x] Bridge ForgeExecutor `execute_inference` to real launcher execution when ROCm GPU is available.
-- [x] Truthful execution status transition: `PREPARED` -> `EXECUTED` upon verified model generation with `amd_validated=True`.
-- [x] CLI command: `rocmhub forge execute <build_dir> [--prompt <text>] [--device <id>] [--max-new-tokens <n>] [--timeout <sec>] [--json]`.
+- [x] Truthful execution status transition: `PREPARED` -> `EXECUTED` strictly when 5 separate facts are verified (`process_success`, `inference_executed`, `hip_runtime_used`, `amd_gpu_used`, `validation_passed`).
+- [x] CLI commands:
+  - `rocmhub doctor [--json]`: system diagnostics, kfd/render permissions, rocm-smi, torch.version.hip.
+  - `rocmhub forge execute <build_dir> [--prompt <text>] [--device <id>] [--max-new-tokens <n>] [--timeout <sec>] [--dry-run] [--json]`.
+  - `rocmhub run --dry-run`: safe execution pipeline dry-run without accelerator.
+- [x] Full first AMD run documentation (`FIRST_AMD_RUN.md`) with preflight checklist, run pipeline, and diagnostics.
+- [x] Reproducible first AMD run scenario script (`scripts/first_amd_run.py`) implementing `inspect -> doctor -> forge build -> execute dry-run -> validate -> benchmark -> artifact -> guard`.
+- [x] Provenance persistence: extended `BuildManifest` with `gfx_target`, `rocm_version`, `hip_version`, `torch_version`, `validation_passed`.
 - [x] Worker integration: forwarded `execute_inference` flag from orchestrator payload to ForgeExecutor.
-- **Verification**: 352 Pytest unit tests passed (+5 new tests in `TestForgeExecutionReadiness`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean.
+- **Verification**: 364 Pytest unit tests passed (including dedicated `tests/test_doctor.py` and `tests/test_execution_safety.py`), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean. Safe dry-run verified on macOS.
 
 ---
 

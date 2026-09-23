@@ -77,6 +77,11 @@ class BuildManifest(BaseModel):
     created_at: str = Field(default_factory=_utc_now_iso, description="UTC build start timestamp.")
     completed_at: Optional[str] = Field(default=None, description="UTC build completion timestamp.")
     amd_validated: bool = Field(default=False, description="Whether execution was verified on actual AMD ROCm hardware.")
+    gfx_target: Optional[str] = Field(default=None, description="Actual AMD GPU gfx target (e.g. gfx1100, gfx942).")
+    rocm_version: Optional[str] = Field(default=None, description="Host ROCm stack version.")
+    hip_version: Optional[str] = Field(default=None, description="PyTorch HIP runtime version.")
+    torch_version: Optional[str] = Field(default=None, description="PyTorch library version.")
+    validation_passed: Optional[bool] = Field(default=None, description="Whether generated output passed correctness validation.")
     secret_scan_clean: bool = Field(default=True, description="Whether secret scanning verified no leaked credentials.")
     artifacts: Dict[str, str] = Field(
         default_factory=dict,

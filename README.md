@@ -108,7 +108,8 @@ node scripts/browser_e2e.js
 # Display version
 rocmhub --version
 
-# Show environment
+# Diagnostics & environment doctor
+rocmhub doctor
 rocmhub env
 
 # Inspect model metadata
@@ -117,15 +118,19 @@ rocmhub inspect Qwen/Qwen2.5-0.5B-Instruct
 # Forge a reproducible AMD execution build
 rocmhub forge build Qwen/Qwen2.5-0.5B-Instruct --output-dir builds/qwen2.5
 
-# Execute standalone inference build on AMD ROCm GPU
+# Dry-run or execute inference build on AMD ROCm GPU
+rocmhub forge execute builds/qwen2.5 --dry-run
 rocmhub forge execute builds/qwen2.5 --prompt "Hello AMD" --max-new-tokens 32
 
-# Run benchmark pipeline
+# Run benchmark pipeline (or safe dry-run on non-AMD systems)
+rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
 rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 
 # Start local API server
 rocmhub serve --host 127.0.0.1 --port 8000
 ```
+
+See [FIRST_AMD_RUN.md](FIRST_AMD_RUN.md) for full step-by-step AMD deployment guidance.
 
 ---
 

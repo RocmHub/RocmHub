@@ -69,7 +69,7 @@ The first target configuration planned for physical validation is:
 
 - **GPU**: AMD Radeon RX 7900 XTX (24 GB VRAM)
 - **Architecture**: `gfx1100` (RDNA 3)
-- **Operating System**: Ubuntu 22.04 LTS or 24.04 LTS (Linux kernel 6.x)
+- **Operating System**: Ubuntu 22.04 LTS (recommended) or Ubuntu 24.04 LTS (target configuration to verify before run)
 - **ROCm Stack**: ROCm 6.2+
 - **PyTorch**: Official PyTorch ROCm/HIP build (`torch.version.hip` active)
 - **Target Model**: `Qwen/Qwen2.5-0.5B-Instruct`

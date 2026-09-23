@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-23T06:40:14.607036+00:00",
+  "timestamp": "2026-09-23T07:51:29.254748+00:00",
   "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
   "precision": "fp16",
   "device_id": 0,
@@ -125,8 +125,8 @@
     },
     "stage_7_artifact_guard": {
       "status": "PASS",
-      "artifact_id": "art-273591b0a7328735c96ae599",
-      "bundle_path": "/Users/netcars/Desktop/RocmHub/diagnostics/artifacts/art-273591b0a7328735c96ae599",
+      "artifact_id": "art-f26ed326af273396490188f6",
+      "bundle_path": "diagnostics/artifacts/art-f26ed326af273396490188f6",
       "guard_verdict": "NOT_MEASURED",
       "reasons": [
         "NO_BENCHMARK_EXECUTION"

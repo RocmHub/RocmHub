@@ -315,10 +315,15 @@ def run_first_amd_pipeline(
         guard_report = guard.evaluate(artifact=bundle_path)
         print(f"  BenchmarkGuard:       {guard_report.verdict.value}")
 
+        try:
+            rel_bundle_path = str(Path(bundle_path).relative_to(Path.cwd()))
+        except ValueError:
+            rel_bundle_path = str(bundle_path)
+
         pipeline_log["stages"]["stage_7_artifact_guard"] = {
             "status": "PASS",
             "artifact_id": artifact_manifest.artifact_id,
-            "bundle_path": str(bundle_path),
+            "bundle_path": rel_bundle_path,
             "guard_verdict": guard_report.verdict.value,
             "reasons": guard_report.reasons,
             "file_count": len(artifact_manifest.files),

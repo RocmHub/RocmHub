@@ -25,7 +25,7 @@ On non-AMD machines (e.g., Apple Silicon macOS, developer laptops, or CPU-only C
 
 ## 2. Prerequisites for Real AMD Execution
 
-### Supported Hardware
+### Target Hardware Architectures (Software Policy Targets)
 - **AMD Instinct Series** (CDNA Architecture):
   - MI300X, MI300A (`gfx942`)
   - MI250X, MI250, MI210 (`gfx90a`)
@@ -36,7 +36,7 @@ On non-AMD machines (e.g., Apple Silicon macOS, developer laptops, or CPU-only C
   - Radeon RX 7800 XT, 7700 XT (`gfx1101`)
 
 ### Software & Environment
-- **Operating System**: Linux (Ubuntu 22.04 LTS / 24.04 LTS recommended)
+- **Operating System**: Linux (Ubuntu 22.04 LTS recommended; Ubuntu 24.04 LTS as target configuration to verify compatibility before hardware run)
 - **ROCm Stack**: ROCm 6.0, 6.1, or 6.2 installed in `/opt/rocm`
 - **PyTorch with ROCm/HIP**:
   ```bash

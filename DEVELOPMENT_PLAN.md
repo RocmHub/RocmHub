@@ -466,6 +466,17 @@ rocmhub run --model Qwen/Qwen2.5-0.5B-Instruct --precision fp16
 - [x] Re-verified packaging: sdist and wheel build, wheel contents inspection (LICENSE, py.typed, entry_points), and automated fresh environment installation smoke testing.
 - **Verification**: Full test suite pass (368 Pytest unit tests), Ruff & Mypy clean, Vitest 12/12 passed, Vite build clean, Chrome E2E 100% pass, fresh environment smoke test 100% pass.
 
+### Phase 20: Final Acceptance, Release Freeze & GitHub Readiness (COMPLETED)
+- [x] Performed independent repository-wide audit of claims, documentation, and code.
+- [x] Zero absolute host paths verified across all repository tracked files.
+- [x] Hardware claims audited and softened: physical validation remains strictly targeted for Milestone 2.0; target operating systems clarified.
+- [x] False-success audit passed: verified fail-closed invariants across all CLI and API paths (`NO_ACCELERATOR`, `NOT_MEASURED`, `CONFIG_ONLY`).
+- [x] Fresh clone simulation verified with clean Python venv and npm ci from lockfile.
+- [x] Real Google Chrome E2E verified 100% across all 5 views and mobile viewport.
+- [x] Clean sdist & wheel build, installation, and CLI import tested in fresh virtual environment.
+- [x] Repository publication audit clean: no secrets, no .env, no local DBs, no external caches.
+- [x] **ROCmHub v0.1.0 — MVP FROZEN**: Feature freeze in effect; ready for public GitHub publication. All physical AMD hardware benchmarks deferred to physical hardware milestone.
+
 ---
 
 ## 3. Definition of Done (Criteria of Readiness for Vertical Slice 1)

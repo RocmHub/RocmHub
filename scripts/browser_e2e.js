@@ -17,7 +17,7 @@ const FRONTEND_PORT = 5175;
 const DB_PATH = '/tmp/rocmhub_e2e_browser.db';
 const WORKSPACE_DIR = '/tmp/rocmhub_e2e_workspace';
 const SCREENSHOT_DIR = path.resolve('screenshots');
-const ARTIFACT_DIR = '/Users/netcars/.gemini/antigravity/brain/87bd6d6d-d501-44b5-80d9-d7da12b37974';
+const ARTIFACT_DIR = process.env.ARTIFACT_DIR || null;
 
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -280,13 +280,17 @@ async function main() {
     await sleep(800);
     console.log('    Clicked "Inspect": navigated and loaded job details successfully.');
 
-    // 7. Copy screenshots to Artifacts directory
-    console.log('[7/8] Copying screenshots to Antigravity brain artifact directory...');
-    const files = fs.readdirSync(SCREENSHOT_DIR);
-    for (const f of files) {
-      fs.copyFileSync(path.join(SCREENSHOT_DIR, f), path.join(ARTIFACT_DIR, f));
+    // 7. Copy screenshots to Artifacts directory if configured
+    if (ARTIFACT_DIR && fs.existsSync(ARTIFACT_DIR)) {
+      console.log(`[7/8] Copying screenshots to artifact directory (${ARTIFACT_DIR})...`);
+      const files = fs.readdirSync(SCREENSHOT_DIR);
+      for (const f of files) {
+        fs.copyFileSync(path.join(SCREENSHOT_DIR, f), path.join(ARTIFACT_DIR, f));
+      }
+      console.log(` -> Copied ${files.length} screenshots to ${ARTIFACT_DIR}`);
+    } else {
+      console.log('[7/8] Screenshots saved locally in screenshots/');
     }
-    console.log(` -> Copied ${files.length} screenshots to ${ARTIFACT_DIR}`);
 
     console.log('[8/8] REAL BROWSER E2E VERIFICATION COMPLETED WITH 100% SUCCESS!');
     console.log('='.repeat(70));

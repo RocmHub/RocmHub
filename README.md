@@ -2,7 +2,6 @@
 
 > Open-source tooling and engineering platform for preparing, benchmarking, validating, and optimizing AI models for AMD ROCm.
 
-[![CI](https://github.com/rocmhub/rocmhub/actions/workflows/ci.yml/badge.svg)](https://github.com/rocmhub/rocmhub/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](pyproject.toml)
 [![Release](https://img.shields.io/badge/Release-0.1.0_MVP-green)](RELEASE_NOTES_0.1.0.md)
@@ -62,7 +61,7 @@ To maintain strict scientific and technical transparency, we clearly delineate b
 The primary target configuration prepared for the initial physical hardware validation milestone:
 - **Target GPU**: AMD Radeon RX 7900 XTX (24 GB VRAM)
 - **Target Architecture**: `gfx1100` (RDNA 3)
-- **Host OS**: Ubuntu 22.04 LTS / 24.04 LTS (Linux kernel 6.x)
+- **Host OS**: Ubuntu 22.04 LTS (recommended) / Ubuntu 24.04 LTS (target configuration to verify before run)
 - **ROCm Stack**: ROCm 6.2+
 - **PyTorch**: Official PyTorch ROCm build (`torch.version.hip` active)
 - **Target Model**: `Qwen/Qwen2.5-0.5B-Instruct` (FP16)

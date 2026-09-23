@@ -5,7 +5,9 @@ import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
-import { Bot, Play, XCircle, CheckCircle2, Clock, RotateCcw, AlertCircle } from 'lucide-react';
+import { Bot, Play, XCircle, CheckCircle2, Clock, RotateCcw, AlertCircle, Sparkles, Cpu, Target, Shield, Check } from 'lucide-react';
+
+import aiEngineerHeroImg from '../../assets/visuals/ai_engineer_hero.svg';
 
 interface AIEngineerViewProps {
   selectedJobId?: string | null;
@@ -157,96 +159,128 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
     }
   };
 
+  const OBJECTIVES = [
+    { id: 'BASE_PREPARATION', label: 'Base Preparation', desc: 'Baseline runtime & metadata verification' },
+    { id: 'MAX_THROUGHPUT', label: 'Max Throughput', desc: 'Optimize generation tokens per second' },
+    { id: 'MIN_LATENCY', label: 'Min Latency', desc: 'Minimize time-to-first-token (TTFT)' },
+    { id: 'FULL_PREPARATION', label: 'Full Preparation', desc: 'Prepare weights when hardware confirmed' },
+  ];
+
   return (
     <div className="space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-xl font-bold text-content-primary">Autonomous AI Engineer</h1>
-        <p className="text-xs text-content-secondary mt-0.5">
-          Specialized agent executing iterative model preparation loops, diagnostics, and build repairs.
-        </p>
+      {/* Visual Header Banner */}
+      <div className="relative rounded-xl overflow-hidden border border-surface-border bg-surface shadow-xl">
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-luminosity"
+          style={{ backgroundImage: `url(${aiEngineerHeroImg})` }}
+        />
+        <div className="absolute inset-0 hero-overlay" />
+
+        <div className="relative p-6 space-y-2">
+          <div className="inline-flex items-center space-x-2 px-2.5 py-1 rounded-full bg-accent-red/10 border border-accent-red/30 text-[11px] font-mono text-red-400">
+            <Bot className="w-3.5 h-3.5 text-accent-red" />
+            <span>Autonomous Closed-Loop Optimization</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Autonomous AI Engineer</h1>
+          <p className="text-xs text-zinc-300 max-w-2xl font-sans leading-relaxed">
+            Specialized agent executing iterative model preparation loops, diagnostics, and build repairs.
+          </p>
+        </div>
       </div>
 
       {/* Task Creation Form */}
-      <div className="p-5 rounded-lg bg-surface border border-surface-border space-y-4">
+      <div className="p-6 rounded-xl bg-surface border border-surface-border shadow-sm space-y-5">
         <h2 className="text-sm font-semibold text-content-primary flex items-center space-x-2">
-          <Bot className="w-4 h-4 text-accent-red" />
+          <Target className="w-4 h-4 text-accent-red" />
           <span>Engineer Session Configuration</span>
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1">
+        <div className="space-y-3">
+          <label className="text-xs font-mono text-content-secondary">Optimization Objective</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {OBJECTIVES.map((obj) => {
+              const isSelected = objective === obj.id;
+              return (
+                <button
+                  key={obj.id}
+                  type="button"
+                  onClick={() => setObjective(obj.id)}
+                  className={`p-3 rounded-lg border text-left transition-all font-mono ${
+                    isSelected
+                      ? 'bg-accent-red/10 border-accent-red text-white shadow-sm'
+                      : 'bg-surface-elevated/70 border-surface-border text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <span>{obj.label}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-accent-red" />}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 font-sans leading-tight">{obj.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-mono text-content-secondary">Target Model ID</label>
             <input
               type="text"
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
-              className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
+              className="w-full bg-background border border-surface-border rounded-lg px-3.5 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red focus:ring-1 focus:ring-accent-red transition-all"
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-mono text-content-secondary">Optimization Objective</label>
-            <select
-              value={objective}
-              onChange={(e) => setObjective(e.target.value)}
-              className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-            >
-              <option value="BASE_PREPARATION">BASE_PREPARATION (Baseline preparation)</option>
-              <option value="FULL_PREPARATION">FULL_PREPARATION (Full weights preparation)</option>
-              <option value="AMD_EXECUTION">AMD_EXECUTION (Execution on AMD hardware)</option>
-              <option value="MAX_THROUGHPUT">MAX_THROUGHPUT (Tokens per second)</option>
-              <option value="MIN_LATENCY">MIN_LATENCY (Time to first token)</option>
-            </select>
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-content-secondary">Max Attempts</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={maxAttempts}
+                onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 5)}
+                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-content-secondary">Timeout (m)</label>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={timeoutMinutes}
+                onChange={(e) => setTimeoutMinutes(parseInt(e.target.value) || 10)}
+                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-content-secondary">Disk (GB)</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={maxDiskGb}
+                onChange={(e) => setMaxDiskGb(parseInt(e.target.value) || 10)}
+                className="w-full bg-background border border-surface-border rounded-lg px-3 py-2.5 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Budget Limits */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-surface-border">
-          <div className="space-y-1">
-            <label className="text-xs font-mono text-content-secondary">Max Retry Attempts</label>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={maxAttempts}
-              onChange={(e) => setMaxAttempts(parseInt(e.target.value) || 5)}
-              className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-mono text-content-secondary">Timeout (Minutes)</label>
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={timeoutMinutes}
-              onChange={(e) => setTimeoutMinutes(parseInt(e.target.value) || 10)}
-              className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-mono text-content-secondary">Max Disk Limit (GB)</label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={maxDiskGb}
-              onChange={(e) => setMaxDiskGb(parseInt(e.target.value) || 10)}
-              className="w-full bg-background border border-surface-border rounded px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-accent-red"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-2 border-t border-surface-border">
-          <div className="text-[11px] font-mono text-zinc-500">
-            Safety Boundary: Sandboxed workspace with strict disk, time, and cycle guards.
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-surface-border">
+          <div className="flex items-center space-x-2 text-[11px] font-mono text-zinc-500">
+            <Shield className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Guards: Isolated workspace, step quotas, fail-closed preflight.</span>
           </div>
           <button
             onClick={handleLaunch}
             disabled={isStarting || activeJob?.status === 'RUNNING'}
-            className="flex items-center space-x-2 px-4 py-2 rounded bg-accent-red hover:bg-accent-red-hover text-white text-xs font-medium transition-colors disabled:opacity-50"
+            className="flex items-center space-x-2 px-5 py-2.5 rounded-lg bg-accent-red hover:bg-accent-red-hover text-white text-xs font-semibold transition-all disabled:opacity-50 shadow-md shadow-red-950/40 hover:scale-[1.02] active:scale-[0.98]"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>{isStarting ? 'Launching Agent...' : 'Launch AI Engineer Session'}</span>
@@ -256,11 +290,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
       {/* Active Session & Actions View */}
       {activeJob && (
-        <div className="p-5 rounded-lg bg-surface border border-surface-border space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
+        <div className="p-6 rounded-xl bg-surface border border-surface-border shadow-lg space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h3 className="text-sm font-semibold text-content-primary">Agent Action Progress</h3>
-              <span className="text-xs font-mono text-zinc-400">ID: {activeJob.job_id}</span>
+              <span className="text-xs font-mono text-zinc-400 bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
+                {activeJob.job_id}
+              </span>
               <StatusBadge status={activeJob.status} />
               <DomainStatusTag status={activeJob.domain_status} />
             </div>
@@ -268,7 +304,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             {(activeJob.status === 'RUNNING' || activeJob.status === 'QUEUED') && (
               <button
                 onClick={handleCancel}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors border border-zinc-700"
               >
                 <XCircle className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Cancel Execution</span>
@@ -281,13 +317,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
           {/* Final Agent Report */}
           {jobResult && (
-            <div className="p-4 rounded bg-[#131317] border border-surface-border space-y-4 text-xs font-mono">
-              <div className="flex items-center justify-between border-b border-surface-border pb-2">
-                <span className="font-semibold text-emerald-400 flex items-center space-x-1.5">
-                  <CheckCircle2 className="w-4 h-4" />
+            <div className="p-5 rounded-xl bg-[#121216] border border-surface-border space-y-4 text-xs font-mono">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
+                <span className="font-semibold text-emerald-400 flex items-center space-x-1.5 text-sm">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <span>Agent Session Finished — Domain Status: {jobResult.domain_status || 'CONFIG_ONLY'}</span>
                 </span>
-                <span className="text-zinc-500">
+                <span className="text-zinc-500 text-[11px]">
                   {jobResult.completed_at ? new Date(jobResult.completed_at).toLocaleTimeString() : ''}
                 </span>
               </div>
@@ -295,40 +331,46 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               {/* Report Metrics Bar */}
               {jobResult.result && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
                     <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
                       <Clock className="w-3 h-3" />
                       <span>Duration</span>
                     </div>
-                    <div className="text-zinc-200 font-semibold">
+                    <div className="text-zinc-200 font-bold text-sm">
                       {jobResult.result.total_duration_seconds !== undefined
                         ? `${Number(jobResult.result.total_duration_seconds).toFixed(2)}s`
                         : 'N/A'}
                     </div>
                   </div>
 
-                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
+                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
                     <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
                       <RotateCcw className="w-3 h-3" />
                       <span>Attempts</span>
                     </div>
-                    <div className="text-zinc-200 font-semibold">
+                    <div className="text-zinc-200 font-bold text-sm">
                       {jobResult.result.attempts_used !== undefined
                         ? `${jobResult.result.attempts_used}`
                         : 'N/A'}
                     </div>
                   </div>
 
-                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
-                    <div className="text-zinc-500 text-[10px] uppercase">Target GPU</div>
-                    <div className="text-zinc-200 font-semibold truncate">
+                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
+                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
+                      <Cpu className="w-3 h-3" />
+                      <span>Target GPU</span>
+                    </div>
+                    <div className="text-zinc-200 font-bold text-sm truncate">
                       {jobResult.result.target_gpu || 'Auto / None'}
                     </div>
                   </div>
 
-                  <div className="p-2.5 rounded bg-surface-elevated border border-surface-border space-y-0.5">
-                    <div className="text-zinc-500 text-[10px] uppercase">Build Manifest</div>
-                    <div className="text-emerald-400 font-semibold">
+                  <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border space-y-1">
+                    <div className="text-zinc-500 text-[10px] uppercase flex items-center space-x-1">
+                      <Sparkles className="w-3 h-3 text-emerald-400" />
+                      <span>Build Status</span>
+                    </div>
+                    <div className="text-emerald-400 font-bold text-sm">
                       {jobResult.result.build_manifest?.status || 'CONFIG_ONLY'}
                     </div>
                   </div>
@@ -337,13 +379,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
               {/* Executive Reasons List */}
               {jobResult.result?.reasons && Array.isArray(jobResult.result.reasons) && jobResult.result.reasons.length > 0 && (
-                <div className="p-3 rounded bg-surface-elevated border border-surface-border space-y-1.5">
-                  <div className="text-zinc-400 text-[11px] uppercase font-semibold">Decision Rationale & Executive Summary</div>
-                  <ul className="space-y-1 text-zinc-300">
+                <div className="p-4 rounded-lg bg-surface border border-surface-border space-y-2">
+                  <div className="text-zinc-400 text-[11px] uppercase font-semibold">Decision Rationale &amp; Executive Summary</div>
+                  <ul className="space-y-1.5 text-zinc-300">
                     {jobResult.result.reasons.map((reason: string, idx: number) => (
                       <li key={idx} className="flex items-start space-x-2">
                         <span className="text-accent-red font-bold">›</span>
-                        <span>{reason}</span>
+                        <span className="leading-relaxed">{reason}</span>
                       </li>
                     ))}
                   </ul>
@@ -352,10 +394,10 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
               {/* Errors Handled */}
               {jobResult.result?.errors_encountered && Array.isArray(jobResult.result.errors_encountered) && jobResult.result.errors_encountered.length > 0 && (
-                <div className="p-3 rounded bg-amber-500/10 border border-amber-500/20 space-y-1.5 text-amber-300">
-                  <div className="text-amber-400 text-[11px] uppercase font-semibold flex items-center space-x-1">
+                <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-2 text-amber-300">
+                  <div className="text-amber-400 text-[11px] uppercase font-semibold flex items-center space-x-1.5">
                     <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Diagnostics & Handled Warnings:</span>
+                    <span>Diagnostics &amp; Handled Warnings:</span>
                   </div>
                   <ul className="space-y-1 text-[11px]">
                     {jobResult.result.errors_encountered.map((err: string, idx: number) => (
@@ -371,19 +413,19 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               {/* Action Trajectory Trace */}
               {jobResult.result?.trajectory && Array.isArray(jobResult.result.trajectory) && jobResult.result.trajectory.length > 0 && (
                 <div className="space-y-2 pt-2 border-t border-surface-border">
-                  <div className="text-zinc-400 uppercase text-[11px] font-semibold">Agent Action Trajectory:</div>
-                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  <div className="text-zinc-400 uppercase text-[11px] font-semibold">Agent Action Trajectory ({jobResult.result.trajectory.length} steps):</div>
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                     {jobResult.result.trajectory.map((step: any, idx: number) => (
                       <div
                         key={idx}
-                        className="p-2.5 rounded bg-surface-elevated/70 border border-surface-border text-xs space-y-1"
+                        className="p-3 rounded-lg bg-surface border border-surface-border text-xs space-y-1.5 shadow-sm"
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            <span className="px-1.5 py-0.5 rounded bg-black/40 text-zinc-400 text-[10px] font-mono border border-zinc-800">
+                            <span className="px-1.5 py-0.5 rounded bg-black/50 text-zinc-400 text-[10px] font-mono border border-zinc-800">
                               Step {step.step_index ?? idx + 1}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded bg-accent-red/20 text-accent-red text-[10px] font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-accent-red/15 text-red-400 text-[10px] font-mono border border-accent-red/20 font-semibold">
                               {step.phase}
                             </span>
                             <span className="font-semibold text-zinc-200">{step.action}</span>
@@ -393,12 +435,12 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                           )}
                         </div>
                         {step.observation && (
-                          <div className="text-zinc-400 text-[11px] pl-2 border-l border-zinc-700">
+                          <div className="text-zinc-300 text-[11px] pl-2.5 border-l-2 border-zinc-700 font-sans">
                             {step.observation}
                           </div>
                         )}
                         {step.rationale && (
-                          <div className="text-zinc-500 text-[10px] pl-2 italic">
+                          <div className="text-zinc-500 text-[10px] pl-2.5 italic">
                             Thought: {step.rationale}
                           </div>
                         )}

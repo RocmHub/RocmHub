@@ -18,24 +18,30 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMobileMenu,
 }) => {
   return (
-    <header className="h-14 border-b border-surface-border bg-surface flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
+    <header className="relative h-14 border-b border-surface-border bg-surface/95 backdrop-blur-md flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
+      {/* Top subtle ambient crimson accent line */}
+      <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-accent-red/80 to-transparent" />
+
       {/* Brand & Mobile Toggle */}
       <div className="flex items-center space-x-3">
         {onToggleMobileMenu && (
           <button
             onClick={onToggleMobileMenu}
             aria-label="Toggle navigation menu"
-            className="md:hidden p-1.5 rounded bg-surface-elevated text-zinc-300 hover:text-white border border-surface-border"
+            className="md:hidden p-1.5 rounded bg-surface-elevated text-zinc-300 hover:text-white border border-surface-border transition-colors"
           >
             {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         )}
-        <div className="w-7 h-7 rounded bg-accent-red flex items-center justify-center font-bold text-white text-sm tracking-wider font-mono shrink-0">
+        <div className="w-7 h-7 rounded bg-gradient-to-br from-accent-red to-red-700 flex items-center justify-center font-bold text-white text-xs tracking-wider font-mono shrink-0 shadow-sm shadow-red-950/50">
           RH
         </div>
-        <div className="flex items-baseline space-x-2">
-          <span className="font-semibold text-content-primary tracking-tight">ROCmHub</span>
-          <span className="hidden sm:inline text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Engineering Platform</span>
+        <div className="flex items-center space-x-2.5">
+          <span className="font-bold text-content-primary tracking-tight">ROCmHub</span>
+          <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-accent-red-muted text-red-400 border border-red-500/20">
+            v0.1.0 MVP
+          </span>
+          <span className="hidden lg:inline text-[11px] font-mono text-zinc-500 tracking-normal">Engineering Platform</span>
         </div>
       </div>
 

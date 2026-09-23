@@ -45,23 +45,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               onClick={() => handleTabClick(item.id)}
-              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all ${
                 isActive
-                  ? 'bg-surface-elevated text-content-primary border-l-2 border-accent-red'
-                  : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated/50'
+                  ? 'bg-gradient-to-r from-accent-red/20 via-surface-elevated to-transparent text-white border-l-2 border-accent-red font-semibold shadow-sm'
+                  : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated/60'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-accent-red' : 'text-content-muted'}`} />
+              <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-accent-red' : 'text-zinc-500'}`} />
               <span>{item.label}</span>
             </button>
           );
         })}
       </nav>
 
-      <div className="p-3 rounded-lg bg-surface-elevated/40 border border-surface-border text-[11px] text-zinc-500 font-mono space-y-1">
-        <div className="text-zinc-400 font-semibold uppercase">Platform Mode</div>
-        <div>Localhost Isolated</div>
-        <div className="text-zinc-600">No synthetic GPU metrics</div>
+      <div className="p-3 rounded-lg bg-surface-elevated/50 border border-surface-border text-[11px] text-zinc-400 font-mono space-y-1.5 shadow-inner">
+        <div className="flex items-center space-x-1.5 text-zinc-300 font-semibold text-[10px] tracking-wider uppercase">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Truthful Engine</span>
+        </div>
+        <div className="text-zinc-500 text-[10px] leading-tight">
+          Fail-closed preflight active. Zero synthetic metrics.
+        </div>
       </div>
     </div>
   );

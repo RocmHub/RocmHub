@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="100%" height="100%">
+  <defs>
+    <radialGradient id="search-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="sweep-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Ambient Glow -->
+  <circle cx="200" cy="150" r="100" fill="url(#search-glow)" />
+
+  <!-- Radar Grid Circles -->
+  <circle cx="200" cy="150" r="110" fill="none" stroke="#2E2E38" stroke-width="1" stroke-dasharray="4,6" />
+  <circle cx="200" cy="150" r="80" fill="none" stroke="#2E2E38" stroke-width="1" />
+  <circle cx="200" cy="150" r="50" fill="none" stroke="#3E3E4C" stroke-width="1" />
+  <circle cx="200" cy="150" r="20" fill="none" stroke="#ED1C24" stroke-width="1.5" opacity="0.6" />
+
+  <!-- Radar Reticle Crosshairs -->
+  <line x1="200" y1="25" x2="200" y2="275" stroke="#2E2E38" stroke-width="1" stroke-dasharray="2,4" />
+  <line x1="75" y1="150" x2="325" y2="150" stroke="#2E2E38" stroke-width="1" stroke-dasharray="2,4" />
+
+  <!-- Radar Sweep Sector -->
+  <path d="M200,150 L270,75 A 110,110 0 0,0 200,40 Z" fill="url(#sweep-gradient)" />
+
+  <!-- Target Marker (Scanning Point) -->
+  <circle cx="255" cy="100" r="4" fill="#38bdf8" />
+  <circle cx="255" cy="100" r="9" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.75" />
+
+  <!-- Corner Tech Brackets -->
+  <path d="M120,80 L100,80 L100,100" fill="none" stroke="#71717A" stroke-width="1.5" />
+  <path d="M280,80 L300,80 L300,100" fill="none" stroke="#71717A" stroke-width="1.5" />
+  <path d="M120,220 L100,220 L100,200" fill="none" stroke="#71717A" stroke-width="1.5" />
+  <path d="M280,220 L300,220 L300,200" fill="none" stroke="#71717A" stroke-width="1.5" />
+</svg>

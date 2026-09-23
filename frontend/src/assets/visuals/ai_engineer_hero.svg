@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="ai-bg" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#1f1418" />
+      <stop offset="50%" stop-color="#141418" />
+      <stop offset="100%" stop-color="#0c0c0f" />
+    </radialGradient>
+
+    <!-- Crimson Glow Filter -->
+    <filter id="crimson-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="deep-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Linear Gradients -->
+    <linearGradient id="laser-red" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ED1C24" />
+      <stop offset="100%" stop-color="#800A0F" />
+    </linearGradient>
+
+    <linearGradient id="neon-cyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0.2" />
+    </linearGradient>
+
+    <linearGradient id="card-surface" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#24242d" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#17171d" stop-opacity="0.95" />
+    </linearGradient>
+  </defs>
+
+  <!-- Deep Background -->
+  <rect width="1200" height="675" fill="url(#ai-bg)" />
+
+  <!-- Technical Grid Matrix -->
+  <g opacity="0.12" stroke="#ffffff" stroke-width="0.5">
+    <line x1="0" y1="135" x2="1200" y2="135" stroke-dasharray="4,8" />
+    <line x1="0" y1="270" x2="1200" y2="270" stroke-dasharray="4,8" />
+    <line x1="0" y1="405" x2="1200" y2="405" stroke-dasharray="4,8" />
+    <line x1="0" y1="540" x2="1200" y2="540" stroke-dasharray="4,8" />
+    <line x1="240" y1="0" x2="240" y2="675" stroke-dasharray="4,8" />
+    <line x1="480" y1="0" x2="480" y2="675" stroke-dasharray="4,8" />
+    <line x1="720" y1="0" x2="720" y2="675" stroke-dasharray="4,8" />
+    <line x1="960" y1="0" x2="960" y2="675" stroke-dasharray="4,8" />
+  </g>
+
+  <!-- Hexagonal Tech Matrix Accents -->
+  <g opacity="0.15" stroke="#ED1C24" stroke-width="1" fill="none">
+    <polygon points="600,120 635,140 635,180 600,200 565,180 565,140" />
+    <polygon points="600,475 635,495 635,535 600,555 565,535 565,495" />
+    <polygon points="260,300 295,320 295,360 260,380 225,360 225,320" />
+    <polygon points="940,300 975,320 975,360 940,380 905,360 905,320" />
+  </g>
+
+  <!-- Central Agent Core Circles -->
+  <circle cx="600" cy="337" r="220" fill="none" stroke="#ED1C24" stroke-width="1" stroke-dasharray="8,12" opacity="0.25" />
+  <circle cx="600" cy="337" r="170" fill="none" stroke="#ED1C24" stroke-width="1.5" stroke-dasharray="30,10" opacity="0.4" filter="url(#crimson-glow)" />
+  <circle cx="600" cy="337" r="120" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.3" stroke-dasharray="4,6" />
+  <circle cx="600" cy="337" r="80" fill="#1b1215" stroke="url(#laser-red)" stroke-width="2" filter="url(#deep-glow)" />
+  <circle cx="600" cy="337" r="45" fill="#ED1C24" opacity="0.85" filter="url(#crimson-glow)" />
+  <circle cx="600" cy="337" r="18" fill="#ffffff" />
+
+  <!-- Autonomous Thought/Action Circuit Pathways -->
+  <g stroke="url(#laser-red)" stroke-width="1.5" fill="none" opacity="0.75" filter="url(#crimson-glow)">
+    <!-- Pathway North -->
+    <path d="M600,257 L600,160 L500,100" />
+    <circle cx="500" cy="100" r="4" fill="#ED1C24" />
+
+    <!-- Pathway South -->
+    <path d="M600,417 L600,510 L700,575" />
+    <circle cx="700" cy="575" r="4" fill="#ED1C24" />
+
+    <!-- Pathway West (Observe & Inspect) -->
+    <path d="M520,337 L360,337 L300,260 L180,260" />
+    <circle cx="180" cy="260" r="4" fill="#38bdf8" />
+
+    <!-- Pathway East (Synthesize & Validate) -->
+    <path d="M680,337 L840,337 L900,410 L1020,410" />
+    <circle cx="1020" cy="410" r="4" fill="#10B981" />
+  </g>
+
+  <!-- Neural Connection Nodes -->
+  <g opacity="0.6">
+    <line x1="600" y1="337" x2="420" y2="200" stroke="#38bdf8" stroke-width="1" stroke-dasharray="2,4" />
+    <circle cx="420" cy="200" r="5" fill="#38bdf8" />
+
+    <line x1="600" y1="337" x2="780" y2="200" stroke="#ED1C24" stroke-width="1" stroke-dasharray="2,4" />
+    <circle cx="780" cy="200" r="5" fill="#ED1C24" />
+
+    <line x1="600" y1="337" x2="420" y2="475" stroke="#ED1C24" stroke-width="1" stroke-dasharray="2,4" />
+    <circle cx="420" cy="475" r="5" fill="#ED1C24" />
+
+    <line x1="600" y1="337" x2="780" y2="475" stroke="#10B981" stroke-width="1" stroke-dasharray="2,4" />
+    <circle cx="780" cy="475" r="5" fill="#10B981" />
+  </g>
+
+  <!-- Floating Telemetry HUD Card Left (Thought & Plan) -->
+  <g transform="translate(100, 360)">
+    <rect width="240" height="120" rx="8" fill="url(#card-surface)" stroke="#2E2E38" stroke-width="1" />
+    <rect width="4" height="120" rx="2" fill="#ED1C24" />
+    <text x="20" y="30" fill="#ED1C24" font-family="monospace" font-size="11" font-weight="bold" letter-spacing="1.5">PHASE: REASONING</text>
+    <text x="20" y="52" fill="#F5F5F7" font-family="monospace" font-size="13" font-weight="600">Analyze Model Spec</text>
+    <text x="20" y="74" fill="#A1A1AA" font-family="monospace" font-size="10">Evaluate attention heads &amp; layers</text>
+    <text x="20" y="94" fill="#71717A" font-family="monospace" font-size="9">Iteration depth: 1/5 | Cost: bounded</text>
+  </g>
+
+  <!-- Floating Telemetry HUD Card Right (Autonomous Actions) -->
+  <g transform="translate(860, 180)">
+    <rect width="240" height="120" rx="8" fill="url(#card-surface)" stroke="#2E2E38" stroke-width="1" />
+    <rect width="4" height="120" rx="2" fill="#38bdf8" />
+    <text x="20" y="30" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold" letter-spacing="1.5">EXECUTION: TOOL ORCH</text>
+    <text x="20" y="52" fill="#F5F5F7" font-family="monospace" font-size="13" font-weight="600">Materialize Recipe</text>
+    <text x="20" y="74" fill="#A1A1AA" font-family="monospace" font-size="10">Generate runtime_config.json</text>
+    <text x="20" y="94" fill="#10B981" font-family="monospace" font-size="9">&#x2713; Integrity checksum verified</text>
+  </g>
+
+  <!-- Bottom Technical Coordinate Badge -->
+  <g transform="translate(460, 610)" opacity="0.8">
+    <rect width="280" height="28" rx="14" fill="#17171d" stroke="#2E2E38" stroke-width="1" />
+    <circle cx="480" cy="624" r="4" fill="#ED1C24" />
+    <text x="495" y="628" fill="#A1A1AA" font-family="monospace" font-size="10" letter-spacing="1">AGENT CORE // BOUNDED AUTONOMY</text>
+  </g>
+</svg>

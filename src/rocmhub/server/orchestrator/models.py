@@ -141,6 +141,10 @@ class AgentCompleteRequest(BaseModel):
     result: Dict[str, Any]
     output_dir: Optional[str] = None
     revision: Optional[str] = None
+    artifact_files: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Small UTF-8 preparation artifacts uploaded by an authenticated Agent",
+    )
 
 
 class AgentFailRequest(BaseModel):

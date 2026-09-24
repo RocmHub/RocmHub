@@ -690,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve_parser.add_argument(
         "--host",
-        default="127.0.0.1",
+        default=os.environ.get("ROCMHUB_HOST", "127.0.0.1"),
         help="Host address to bind server (default: '127.0.0.1').",
     )
 
@@ -707,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--port",
         type=int,
-        default=8000,
+        default=int(os.environ.get("PORT", os.environ.get("ROCMHUB_PORT", "8000"))),
         help="Port number to bind server (default: 8000).",
     )
     serve_parser.add_argument(

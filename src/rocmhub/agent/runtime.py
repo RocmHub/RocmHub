@@ -104,17 +104,64 @@ class ROCmHubAgent:
             print(f"[agent] {event.get('event')}: {event.get('message', event.get('agent_id', ''))}", flush=True)
 
     def run_forever(self) -> None:
-        if not self.agent_id:
-            self.register()
         while True:
             try:
-                self.api.call("POST", f"/api/v1/agents/{self.agent_id}/heartbeat", {})
-                claim = self.api.call("POST", f"/api/v1/agents/{self.agent_id}/claim", {})
-                if claim and claim.get("job"):
-                    self._run_claim(claim["job"], claim["request_payload"])
+                self.run_once()
             except RuntimeError as exc:
                 self._log({"event": "connection_error", "message": str(exc)})
             time.sleep(self.poll_interval)
+
+    def run_once(self) -> bool:
+        """Register if needed, heartbeat, and execute at most one claimed job."""
+        if not self.agent_id:
+            self.register()
+        self.api.call("POST", f"/api/v1/agents/{self.agent_id}/heartbeat", {})
+        claim = self.api.call("POST", f"/api/v1/agents/{self.agent_id}/claim", {})
+        if not claim or not claim.get("job"):
+            return False
+        self._run_claim(claim["job"], claim["request_payload"])
+        return True
+
+    @staticmethod
+    def _redact_local_paths(value: Any) -> Any:
+        """Keep reproducibility metadata while never sending Agent-local filesystem paths."""
+        sensitive_fields = {"build_dir", "output_dir", "weights_path"}
+        if isinstance(value, dict):
+            return {
+                key: (None if key in sensitive_fields else ROCmHubAgent._redact_local_paths(item))
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [ROCmHubAgent._redact_local_paths(item) for item in value]
+        return value
+
+    @staticmethod
+    def _small_artifact_files(output_dir: Optional[str]) -> Dict[str, str]:
+        """Return the allowlisted textual outputs; never upload weights or arbitrary local files."""
+        if not output_dir:
+            return {}
+        allowed = {
+            "build_manifest.json",
+            "checksums.json",
+            "model_config.json",
+            "recipe.json",
+            "run_inference.py",
+            "runtime_config.json",
+        }
+        uploaded: Dict[str, str] = {}
+        for path in Path(output_dir).iterdir():
+            if path.name not in allowed or not path.is_file() or path.stat().st_size > 262_144:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+                if path.suffix == ".json":
+                    content = json.dumps(ROCmHubAgent._redact_local_paths(json.loads(content)), indent=2, sort_keys=True) + "\n"
+                uploaded[path.name] = content
+            except UnicodeDecodeError:
+                continue
+            except json.JSONDecodeError:
+                continue
+        return uploaded
 
     def _run_claim(self, job: Dict[str, Any], payload: Dict[str, Any]) -> None:
         assert self.agent_id
@@ -160,7 +207,7 @@ class ROCmHubAgent:
                     "target_gfx": payload.get("target_gfx"),
                     "runtime": payload.get("runtime"),
                     "artifacts": (result or {}).get("artifacts", {}),
-                    "artifact_manifest": result,
+                    "artifact_manifest": self._redact_local_paths(result),
                     "agent_observation": {
                         "physical_amd_execution": False,
                         "reason": "This Agent performed configuration preparation only.",
@@ -172,8 +219,8 @@ class ROCmHubAgent:
                     {
                         "domain_status": domain or "CONFIG_ONLY",
                         "result": enriched,
-                        "output_dir": output_dir,
                         "revision": revision,
+                        "artifact_files": self._small_artifact_files(output_dir),
                     },
                 )
             else:

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi import Path as PathParam
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from rocmhub.core.errors import SecurityBoundaryError
 from rocmhub.server.events import sse_event_stream
@@ -123,6 +123,27 @@ async def get_job_result(
             detail=f"Job '{job_id}' was not found.",
         )
     return result
+
+
+@router.get("/{job_id}/artifacts/{artifact_name}")
+async def download_agent_artifact(
+    job_id: str = PathParam(..., pattern=JOB_ID_PATTERN, description="Unique job identifier"),
+    artifact_name: str = PathParam(..., pattern=r"^[a-zA-Z0-9_.-]{1,128}$"),
+    req: Request = None,  # type: ignore[assignment]
+) -> FileResponse:
+    """Download a server-stored small preparation artifact; paths never leave its job directory."""
+    manager: JobManager = req.app.state.job_manager
+    result = manager.get_job_result(job_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' was not found.")
+    declared = (result.result or {}).get("server_artifacts", [])
+    if artifact_name not in {item.get("name") for item in declared if isinstance(item, dict)}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
+    root = req.app.state.config.artifact_storage_dir.resolve()
+    target = (root / job_id / artifact_name).resolve()
+    if target.parent != (root / job_id).resolve() or not target.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
+    return FileResponse(target, filename=artifact_name, media_type="application/octet-stream")
 
 
 @router.post("/{job_id}/cancel")

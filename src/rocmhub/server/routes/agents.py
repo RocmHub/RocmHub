@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from pathlib import Path
 from typing import List, Optional, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -19,6 +20,51 @@ from rocmhub.server.orchestrator.models import (
 )
 
 router = APIRouter(prefix="/api/v1/agents", tags=["Agents"])
+
+_ALLOWED_ARTIFACT_FILES = {
+    "build_manifest.json",
+    "checksums.json",
+    "model_config.json",
+    "recipe.json",
+    "run_inference.py",
+    "runtime_config.json",
+}
+
+
+def _store_agent_artifacts(root: Path, job_id: str, artifact_files: dict[str, str], max_bytes: int) -> list[dict[str, object]]:
+    """Store only known, small text artifacts below the configured storage root."""
+    if not artifact_files:
+        return []
+    if len(artifact_files) > len(_ALLOWED_ARTIFACT_FILES):
+        raise ValueError("Too many Agent artifacts")
+
+    root = root.resolve()
+    job_dir = (root / job_id).resolve()
+    if job_dir.parent != root:
+        raise ValueError("Invalid job artifact path")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    stored: list[dict[str, object]] = []
+    for name, content in artifact_files.items():
+        if name not in _ALLOWED_ARTIFACT_FILES or Path(name).name != name:
+            raise ValueError("Unsupported Agent artifact name")
+        encoded = content.encode("utf-8")
+        if len(encoded) > max_bytes:
+            raise ValueError(f"Agent artifact '{name}' exceeds the configured size limit")
+        target = (job_dir / name).resolve()
+        if target.parent != job_dir:
+            raise ValueError("Invalid Agent artifact path")
+        temp_target = target.with_suffix(f"{target.suffix}.tmp")
+        temp_target.write_bytes(encoded)
+        temp_target.replace(target)
+        stored.append(
+            {
+                "name": name,
+                "bytes": len(encoded),
+                "sha256": hashlib.sha256(encoded).hexdigest(),
+                "download_path": f"/api/v1/jobs/{job_id}/artifacts/{name}",
+            }
+        )
+    return stored
 
 
 def _token_hash(authorization: Optional[str]) -> str:
@@ -115,8 +161,20 @@ async def complete(
     authorization: Optional[str] = Header(default=None),
 ) -> None:
     _authorize(req, authorization)
+    try:
+        stored = _store_agent_artifacts(
+            req.app.state.config.artifact_storage_dir,
+            job_id,
+            payload.artifact_files,
+            req.app.state.config.max_agent_artifact_bytes,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid Agent artifact: {exc}") from exc
+    result = dict(payload.result)
+    if stored:
+        result["server_artifacts"] = stored
     if not req.app.state.job_manager.complete_agent_job(
-        agent_id, job_id, payload.domain_status, payload.result, payload.output_dir, payload.revision
+        agent_id, job_id, payload.domain_status, result, None, payload.revision
     ):
         raise HTTPException(status_code=409, detail="Agent does not own this running job")
 

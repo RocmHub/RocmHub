@@ -10,16 +10,34 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
+def _data_dir() -> Path:
+    """Return the durable server data directory, without creating it on import."""
+    return Path(os.environ.get("ROCMHUB_DATA_DIR", Path.home() / ".rocmhub")).expanduser().resolve()
+
+
+def _db_path() -> Path:
+    return Path(os.environ.get("ROCMHUB_DB_PATH", _data_dir() / "jobs.db")).expanduser().resolve()
+
+
 class ServerConfig(BaseModel):
     """Configuration settings for ROCmHub FastAPI server."""
 
     host: str = Field(default="127.0.0.1", description="Host address to bind the server")
-    port: int = Field(default=8000, description="Port number to bind the server")
+    port: int = Field(
+        default_factory=lambda: int(os.environ.get("PORT", os.environ.get("ROCMHUB_PORT", "8000"))),
+        description="Port number to bind the server",
+    )
+    data_dir: Path = Field(default_factory=_data_dir, description="Durable server data directory")
     db_path: Path = Field(
-        default_factory=lambda: Path(
-            os.environ.get("ROCMHUB_DB_PATH", Path.home() / ".rocmhub" / "jobs.db")
-        ).resolve(),
+        default_factory=_db_path,
         description="Path to SQLite database file",
+    )
+    artifact_storage_dir: Path = Field(
+        default_factory=lambda: _data_dir() / "agent-artifacts",
+        description="Durable, bounded storage for small remote Agent artifacts",
+    )
+    max_agent_artifact_bytes: int = Field(
+        default=262_144, ge=1_024, le=1_048_576, description="Maximum bytes per uploaded Agent artifact"
     )
     allowed_workspaces: List[Path] = Field(
         default_factory=lambda: [

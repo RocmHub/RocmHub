@@ -79,6 +79,7 @@ def test_mac_agent_claims_config_only_preparation_once(tmp_path: object) -> None
 
 def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
     with make_client(tmp_path) as client:
+        client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
         job_id = create_prepare(client)
         agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
         client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
@@ -88,13 +89,38 @@ def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
             json={
                 "domain_status": "CONFIG_ONLY",
                 "result": {"weights": "NOT_DOWNLOADED", "artifacts": {"runtime_config.json": "abc"}},
+                "output_dir": "/private/agent-workspace/job",
                 "revision": "deadbeef",
+                "artifact_files": {"runtime_config.json": "{\"device\": \"cpu\"}\n"},
             },
         )
         assert done.status_code == 204
         result = client.get(f"/api/v1/jobs/{job_id}/result").json()
         assert result["job_status"] == "SUCCEEDED"
         assert result["result"]["artifacts"]["runtime_config.json"] == "abc"
+        assert result["output_dir"] is None
+        stored = result["result"]["server_artifacts"]
+        assert stored[0]["name"] == "runtime_config.json"
+        downloaded = client.get(stored[0]["download_path"])
+        assert downloaded.status_code == 200
+        assert downloaded.text == "{\"device\": \"cpu\"}\n"
+
+
+def test_agent_artifact_upload_rejects_path_escape(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        rejected = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "CONFIG_ONLY",
+                "result": {"weights": "NOT_DOWNLOADED"},
+                "artifact_files": {"../private.txt": "nope"},
+            },
+        )
+        assert rejected.status_code == 400
 
 
 def test_agent_heartbeat_reconnect_and_token_revocation(tmp_path: object) -> None:

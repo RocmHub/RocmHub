@@ -7,7 +7,7 @@ from pathlib import Path
 from rocmhub.server.config import ServerConfig
 
 
-def test_railway_port_and_durable_data_directory_are_environment_driven(monkeypatch: object, tmp_path: Path) -> None:
+def test_platform_port_and_durable_data_directory_are_environment_driven(monkeypatch: object, tmp_path: Path) -> None:
     monkeypatch.setenv("PORT", "4567")  # type: ignore[attr-defined]
     monkeypatch.setenv("ROCMHUB_DATA_DIR", str(tmp_path / "railway-volume"))  # type: ignore[attr-defined]
 

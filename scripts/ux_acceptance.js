@@ -6,22 +6,45 @@
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const NODE = '/Users/netcars/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node';
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const BACKEND_PORT = 8780;
-const FRONTEND_PORT = 5180;
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FRONTEND_DIR = path.join(PROJECT_ROOT, 'frontend');
+const BACKEND_PORT = Number(process.env.ROCMHUB_BACKEND_PORT || 8780);
+const FRONTEND_PORT = Number(process.env.ROCMHUB_FRONTEND_PORT || 5180);
 const BASE = `http://127.0.0.1:${FRONTEND_PORT}`;
-const OUT = path.resolve('screenshots/acceptance');
-const DB = '/tmp/rocmhub_ux_acceptance.db';
-const WORKSPACE = '/tmp/rocmhub_ux_acceptance_workspace';
+const OUT = path.resolve(process.env.ROCMHUB_SCREENSHOT_DIR || path.join(PROJECT_ROOT, 'screenshots', 'acceptance'));
 const VALID_MODEL = 'Qwen/Qwen2.5-0.5B-Instruct';
 const INVALID_MODEL = 'rocmhub-ux/no-such-model-acceptance';
 
+function findPython() {
+  const configured = process.env.ROCMHUB_PYTHON || process.env.PYTHON;
+  if (configured) return configured;
+  const venv = process.env.VIRTUAL_ENV;
+  const localVenv = path.join(PROJECT_ROOT, '.venv');
+  const candidates = [
+    venv && path.join(venv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python3'),
+    path.join(localVenv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python3'),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || (process.platform === 'win32' ? 'python' : 'python3');
+}
+
+function requireChrome() {
+  const configured = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (configured && fs.existsSync(configured)) return configured;
+  throw new Error('Set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to a Chrome/Chromium executable.');
+}
+
+const PYTHON = findPython();
+const CHROME = requireChrome();
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rocmhub-ux-acceptance-'));
+const DB = path.join(TEMP_DIR, 'jobs.db');
+const WORKSPACE = path.join(TEMP_DIR, 'workspace');
+
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(WORKSPACE, { recursive: true });
-if (fs.existsSync(DB)) fs.unlinkSync(DB);
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -83,17 +106,18 @@ async function shot(page, name, fullPage = false) {
 }
 
 async function main() {
-  const backend = spawn('.venv/bin/python3', [
+  const backend = spawn(PYTHON, [
     '-m', 'uvicorn', 'rocmhub.server.app:create_app', '--factory',
     '--host', '127.0.0.1', '--port', String(BACKEND_PORT),
   ], {
-    env: { ...process.env, ROCMHUB_DB_PATH: DB, ROCMHUB_ALLOWED_WORKSPACES: `${WORKSPACE},/tmp` },
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, ROCMHUB_DB_PATH: DB, ROCMHUB_ALLOWED_WORKSPACES: `${WORKSPACE},${TEMP_DIR}` },
     stdio: 'pipe',
   });
-  const frontend = spawn(NODE, [
+  const frontend = spawn(process.execPath, [
     'node_modules/vite/bin/vite.js', '--port', String(FRONTEND_PORT), '--host', '127.0.0.1',
   ], {
-    cwd: path.resolve('frontend'),
+    cwd: FRONTEND_DIR,
     env: { ...process.env, VITE_BACKEND_PORT: String(BACKEND_PORT) },
     stdio: 'pipe',
   });
@@ -142,7 +166,7 @@ async function main() {
     await shot(page, '05_explorer_success.png');
 
     console.log('Forge: every wizard step → planning → running → output → failure → recovery');
-    await clickText(page, 'Continue to Forge');
+    await clickText(page, 'Review in Forge');
     await waitForText(page, 'Choose the model');
     await shot(page, '06_forge_step_model.png');
     await clickText(page, 'Choose target');
@@ -244,6 +268,7 @@ async function main() {
     backend.kill();
     frontend.kill();
     await sleep(400);
+    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
   }
 }
 

@@ -17,7 +17,9 @@ Screenshots are stored in `screenshots/acceptance/`.
 ## Run locally
 
 ```bash
-/Users/netcars/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/ux_acceptance.js
+node scripts/ux_acceptance.js
 ```
 
-The runner uses isolated ports `8780` and `5180` and removes its temporary database before every run. It shuts down only those isolated processes when finished, leaving the normal development servers untouched.
+Run the command from the repository root. The runner locates the project relative to its own script, uses the current Node executable, and locates Python from `ROCMHUB_PYTHON`, the active virtual environment, or the repository's `.venv`. Install `puppeteer-core` in `frontend/` and set `CHROME_PATH` (or `PUPPETEER_EXECUTABLE_PATH`) to a Chrome/Chromium executable.
+
+The runner uses isolated ports `8780` and `5180` and a unique temporary directory for its database and workspace. It shuts down only those isolated processes when finished, leaving the normal development servers untouched.

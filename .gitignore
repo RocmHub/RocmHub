@@ -28,6 +28,9 @@ MANIFEST
 
 # Virtual environments
 .env
+.env.*
+!.env.example
+!.env.*.example
 .venv
 env/
 venv/
@@ -65,4 +68,3 @@ node_modules
 node_modules/
 frontend/dist/
 frontend/.vite/
-

@@ -9,20 +9,42 @@
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const NODE_PATH = '/Users/netcars/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node';
-const BACKEND_PORT = 8770;
-const FRONTEND_PORT = 5175;
-const DB_PATH = '/tmp/rocmhub_e2e_browser.db';
-const WORKSPACE_DIR = '/tmp/rocmhub_e2e_workspace';
-const SCREENSHOT_DIR = path.resolve('screenshots');
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FRONTEND_DIR = path.join(PROJECT_ROOT, 'frontend');
+const BACKEND_PORT = Number(process.env.ROCMHUB_BACKEND_PORT || 8770);
+const FRONTEND_PORT = Number(process.env.ROCMHUB_FRONTEND_PORT || 5175);
+const SCREENSHOT_DIR = path.resolve(process.env.ROCMHUB_SCREENSHOT_DIR || path.join(PROJECT_ROOT, 'screenshots'));
 const ARTIFACT_DIR = process.env.ARTIFACT_DIR || null;
 
+function findPython() {
+  const configured = process.env.ROCMHUB_PYTHON || process.env.PYTHON;
+  if (configured) return configured;
+  const venv = process.env.VIRTUAL_ENV;
+  const localVenv = path.join(PROJECT_ROOT, '.venv');
+  const candidates = [
+    venv && path.join(venv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python3'),
+    path.join(localVenv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python3'),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || (process.platform === 'win32' ? 'python' : 'python3');
+}
+
+function requireChrome() {
+  const configured = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (configured && fs.existsSync(configured)) return configured;
+  throw new Error('Set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to a Chrome/Chromium executable.');
+}
+
+const PYTHON = findPython();
+const CHROME_PATH = requireChrome();
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rocmhub-browser-e2e-'));
+const DB_PATH = path.join(TEMP_DIR, 'jobs.db');
+const WORKSPACE_DIR = path.join(TEMP_DIR, 'workspace');
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
-if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,11 +125,11 @@ async function main() {
   const backendEnv = {
     ...process.env,
     ROCMHUB_DB_PATH: DB_PATH,
-    ROCMHUB_ALLOWED_WORKSPACES: `${WORKSPACE_DIR},/tmp`,
+    ROCMHUB_ALLOWED_WORKSPACES: `${WORKSPACE_DIR},${TEMP_DIR}`,
   };
 
   const backendProc = spawn(
-    '.venv/bin/python3',
+    PYTHON,
     [
       '-m',
       'uvicorn',
@@ -118,7 +140,7 @@ async function main() {
       '--port',
       String(BACKEND_PORT),
     ],
-    { env: backendEnv, stdio: 'pipe' }
+    { cwd: PROJECT_ROOT, env: backendEnv, stdio: 'pipe' }
   );
 
   // 2. Launch Vite frontend
@@ -129,9 +151,9 @@ async function main() {
   };
 
   const frontendProc = spawn(
-    NODE_PATH,
+    process.execPath,
     ['node_modules/vite/bin/vite.js', '--port', String(FRONTEND_PORT), '--host', '127.0.0.1'],
-    { cwd: path.resolve('frontend'), env: frontendEnv, stdio: 'pipe' }
+    { cwd: FRONTEND_DIR, env: frontendEnv, stdio: 'pipe' }
   );
 
   let browser;
@@ -211,7 +233,7 @@ async function main() {
 
     // --- STEP 2: Forge Studio ---
     console.log(' -> [Journey 2/5] Forge Studio: Generate Plan & Run CONFIG_ONLY Build');
-    await clickByText(page, 'Continue to Forge');
+    await clickByText(page, 'Review in Forge');
     await waitForText(page, 'Forge Studio');
     await sleep(500);
 
@@ -306,7 +328,7 @@ async function main() {
       }
       console.log(` -> Copied ${files.length} screenshots to ${ARTIFACT_DIR}`);
     } else {
-      console.log('[7/8] Screenshots saved locally in screenshots/');
+      console.log(`[7/8] Screenshots saved locally in ${SCREENSHOT_DIR}/`);
     }
 
     console.log('[8/8] REAL BROWSER E2E VERIFICATION COMPLETED WITH 100% SUCCESS!');
@@ -316,6 +338,7 @@ async function main() {
     backendProc.kill();
     frontendProc.kill();
     await sleep(500);
+    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
   }
 }
 

@@ -157,8 +157,9 @@ class JobManager:
         status: str,
         message: str,
         details: Optional[Dict[str, Any]] = None,
+        attempt: Optional[int] = None,
     ) -> bool:
-        if not self.db.agent_owns_running_job(agent_id, job_id):
+        if not self.db.agent_owns_running_job(agent_id, job_id, attempt):
             return False
         self.db.heartbeat_agent(agent_id)
         self.emit_event(job_id, phase, status, message, details=details)
@@ -170,21 +171,21 @@ class JobManager:
         job_id: str,
         domain_status: str,
         result: Dict[str, Any],
-        output_dir: Optional[str],
         revision: Optional[str],
+        attempt: Optional[int] = None,
     ) -> bool:
-        if not self.db.agent_owns_running_job(agent_id, job_id):
-            return False
         now = datetime.now(timezone.utc).isoformat()
-        self.db.update_job_status(
+        if not self.db.finish_agent_job(
+            agent_id,
             job_id,
+            attempt,
             JobStatus.SUCCEEDED,
             completed_at=now,
             domain_status=domain_status,
             result_payload=result,
-            output_dir=output_dir,
             revision=revision,
-        )
+        ):
+            return False
         self.emit_event(
             job_id,
             "COMPLETED",
@@ -194,13 +195,25 @@ class JobManager:
         )
         return True
 
-    def fail_agent_job(self, agent_id: str, job_id: str, error_message: str, error_code: str) -> bool:
-        if not self.db.agent_owns_running_job(agent_id, job_id):
-            return False
+    def fail_agent_job(
+        self,
+        agent_id: str,
+        job_id: str,
+        error_message: str,
+        error_code: str,
+        attempt: Optional[int] = None,
+    ) -> bool:
         now = datetime.now(timezone.utc).isoformat()
-        self.db.update_job_status(
-            job_id, JobStatus.FAILED, completed_at=now, error_message=error_message, error_code=error_code
-        )
+        if not self.db.finish_agent_job(
+            agent_id,
+            job_id,
+            attempt,
+            JobStatus.FAILED,
+            completed_at=now,
+            error_message=error_message,
+            error_code=error_code,
+        ):
+            return False
         self.emit_event(job_id, "COMPLETED", "FAILED", "External agent job failed", error_code)
         return True
 

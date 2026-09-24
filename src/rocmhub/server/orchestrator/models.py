@@ -134,6 +134,7 @@ class AgentEventRequest(BaseModel):
     status: str = Field(min_length=1, max_length=32)
     message: str = Field(min_length=1, max_length=2048)
     details: Optional[Dict[str, Any]] = None
+    attempt: Optional[int] = Field(default=None, ge=1)
 
 
 class AgentCompleteRequest(BaseModel):
@@ -145,11 +146,14 @@ class AgentCompleteRequest(BaseModel):
         default_factory=dict,
         description="Small UTF-8 preparation artifacts uploaded by an authenticated Agent",
     )
+    attempt: Optional[int] = Field(default=None, ge=1)
+    completion_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class AgentFailRequest(BaseModel):
     error_message: str = Field(min_length=1, max_length=2048)
     error_code: str = Field(default="AGENT_EXECUTION_FAILED", max_length=128)
+    attempt: Optional[int] = Field(default=None, ge=1)
 
 
 class JobEvent(BaseModel):

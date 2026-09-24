@@ -6,6 +6,7 @@ actual preparation to the existing Forge executor.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import shutil
@@ -20,6 +21,12 @@ from urllib.request import Request, urlopen
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.server.orchestrator.models import JobEvent, JobStatus, JobType
 from rocmhub.server.orchestrator.worker import execute_job
+
+
+class AgentApiError(RuntimeError):
+    def __init__(self, reason: str, *, transient: bool) -> None:
+        super().__init__(reason)
+        self.transient = transient
 
 
 class AgentApi:
@@ -41,9 +48,9 @@ class AgentApi:
                 raw = response.read().decode()
                 return json.loads(raw) if raw else None
         except HTTPError as exc:
-            raise RuntimeError(f"Agent API request failed ({exc.code})") from exc
-        except URLError as exc:
-            raise RuntimeError("Agent API is unavailable") from exc
+            raise AgentApiError(f"HTTP {exc.code}", transient=exc.code in {408, 425, 429} or exc.code >= 500) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise AgentApiError("Agent API is unavailable", transient=True) from exc
 
 
 class ROCmHubAgent:
@@ -65,6 +72,9 @@ class ROCmHubAgent:
         self.max_concurrent_jobs = max(1, max_concurrent_jobs)
         self.json_output = json_output
         self.agent_id: Optional[str] = None
+        self._connection_was_lost = False
+        self._active_job: Optional[str] = None
+        self._active_attempt: Optional[int] = None
 
     def capabilities(self) -> Dict[str, Any]:
         report = SystemObserver().observe()
@@ -99,16 +109,62 @@ class ROCmHubAgent:
 
     def _log(self, event: Dict[str, Any]) -> None:
         if self.json_output:
+            event.setdefault("type", event.get("event", "status"))
             print(json.dumps(event, sort_keys=True), flush=True)
         else:
-            print(f"[agent] {event.get('event')}: {event.get('message', event.get('agent_id', ''))}", flush=True)
+            name = str(event.get("event", "status"))
+            job_id = event.get("job_id")
+            attempt = event.get("attempt")
+            if name == "registered":
+                text = str(event.get("agent_id", ""))
+            elif name == "claimed":
+                text = f"{job_id} attempt={attempt}"
+            elif name == "preparing" or name == "completing":
+                text = str(job_id or "")
+            elif name in {"artifacts_ready", "uploading_artifacts"}:
+                text = f"{job_id} count={event.get('count', 0)}"
+            elif name == "completed":
+                text = f"{job_id} status={event.get('status', 'unknown')}"
+            elif name == "connection_error":
+                context = f" {job_id} attempt={attempt}" if job_id else ""
+                text = f"{event.get('reason', 'Agent API is unavailable')}{context}; retrying"
+            elif name == "connection_restored":
+                text = f"{job_id} attempt={attempt}" if job_id else "control plane"
+            elif name == "terminal_error":
+                text = f"{job_id}: {event.get('reason', 'request rejected')}"
+            else:
+                text = str(event.get("message", ""))
+            print(f"[agent] {name}: {text}".rstrip(), flush=True)
+
+    def _connection_error(self, exc: AgentApiError, job_id: Optional[str] = None, attempt: Optional[int] = None) -> None:
+        already_lost = self._connection_was_lost
+        self._connection_was_lost = True
+        if already_lost:
+            return
+        self._log({
+            "event": "connection_error",
+            "reason": str(exc)[:120],
+            "transient": exc.transient,
+            "retrying": exc.transient,
+            "job_id": job_id,
+            "attempt": attempt,
+        })
+
+    def _note_connection_restored(self) -> None:
+        if self._connection_was_lost:
+            self._log({"event": "connection_restored", "job_id": self._active_job, "attempt": self._active_attempt})
+            self._connection_was_lost = False
 
     def run_forever(self) -> None:
         while True:
             try:
                 self.run_once()
-            except RuntimeError as exc:
-                self._log({"event": "connection_error", "message": str(exc)})
+                self._note_connection_restored()
+            except AgentApiError as exc:
+                if exc.transient:
+                    self._connection_error(exc, self._active_job, self._active_attempt)
+                else:
+                    self._log({"event": "terminal_error", "reason": str(exc)[:120], "job_id": self._active_job})
             time.sleep(self.poll_interval)
 
     def run_once(self) -> bool:
@@ -120,6 +176,7 @@ class ROCmHubAgent:
         if not claim or not claim.get("job"):
             return False
         self._run_claim(claim["job"], claim["request_payload"])
+        self._note_connection_restored()
         return True
 
     @staticmethod
@@ -136,10 +193,12 @@ class ROCmHubAgent:
         return value
 
     @staticmethod
-    def _small_artifact_files(output_dir: Optional[str]) -> Dict[str, str]:
-        """Return the allowlisted textual outputs; never upload weights or arbitrary local files."""
+    def _prepare_artifact_upload(
+        output_dir: Optional[str], forge_artifacts: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """Prepare allowlisted small text outputs while preserving source and stored hashes."""
         if not output_dir:
-            return {}
+            return {"files": {}, "source_artifacts": {}, "artifact_provenance": {}}
         allowed = {
             "build_manifest.json",
             "checksums.json",
@@ -148,32 +207,107 @@ class ROCmHubAgent:
             "run_inference.py",
             "runtime_config.json",
         }
-        uploaded: Dict[str, str] = {}
+        sources: Dict[str, bytes] = {}
+        prepared: Dict[str, bytes] = {}
+        parsed_json: Dict[str, Any] = {}
         for path in Path(output_dir).iterdir():
             if path.name not in allowed or not path.is_file() or path.stat().st_size > 262_144:
                 continue
             try:
-                content = path.read_text(encoding="utf-8")
+                source = path.read_bytes()
+                text = source.decode("utf-8")
+                source_sha = hashlib.sha256(source).hexdigest()
+                expected_sha = (forge_artifacts or {}).get(path.name)
+                if expected_sha is not None and expected_sha != source_sha:
+                    raise ValueError(f"Forge artifact integrity check failed for {path.name}")
+                sources[path.name] = source
                 if path.suffix == ".json":
-                    content = json.dumps(ROCmHubAgent._redact_local_paths(json.loads(content)), indent=2, sort_keys=True) + "\n"
-                uploaded[path.name] = content
-            except UnicodeDecodeError:
+                    original = json.loads(text)
+                    cleaned = ROCmHubAgent._redact_local_paths(original)
+                    parsed_json[path.name] = cleaned
+                    prepared[path.name] = source if cleaned == original else (
+                        json.dumps(cleaned, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+                    ).encode("utf-8")
+                else:
+                    prepared[path.name] = source
+            except (UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            except json.JSONDecodeError:
+        # Keep embedded integrity tables truthful after a privacy redaction.
+        for json_name, key in (("build_manifest.json", "artifacts"), ("checksums.json", "files")):
+            data = parsed_json.get(json_name)
+            if not isinstance(data, dict) or not isinstance(data.get(key), dict):
                 continue
-        return uploaded
+            updated = dict(data)
+            hashes = dict(updated[key])
+            for name in hashes:
+                if name in prepared and name != json_name:
+                    hashes[name] = hashlib.sha256(prepared[name]).hexdigest()
+            updated[key] = hashes
+            if updated != data:
+                parsed_json[json_name] = updated
+                prepared[json_name] = (json.dumps(updated, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+
+        files = {
+            name: data.decode("utf-8")
+            for name, data in prepared.items()
+            if len(data) <= 262_144
+        }
+        source_artifacts = {
+            name: {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            for name, data in sources.items() if name in files
+        }
+        provenance = {
+            name: {
+                "source_sha256": source_artifacts[name]["sha256"],
+                "stored_sha256": hashlib.sha256(prepared[name]).hexdigest(),
+                "sanitized": source_artifacts[name]["sha256"] != hashlib.sha256(prepared[name]).hexdigest(),
+            }
+            for name in files
+        }
+        return {
+            "files": files,
+            "source_artifacts": source_artifacts,
+            "artifact_provenance": provenance,
+            "artifacts": {name: item["stored_sha256"] for name, item in provenance.items()},
+        }
+
+    @staticmethod
+    def _small_artifact_files(output_dir: Optional[str]) -> Dict[str, str]:
+        """Compatibility helper returning just the allowlisted upload text."""
+        return cast(Dict[str, str], ROCmHubAgent._prepare_artifact_upload(output_dir)["files"])
 
     def _run_claim(self, job: Dict[str, Any], payload: Dict[str, Any]) -> None:
         assert self.agent_id
         job_id = job["job_id"]
+        attempt = int(job.get("attempt") or 1)
+        self._active_job = job_id
+        self._active_attempt = attempt
         if job["job_type"] != JobType.PREPARE_MODEL_FOR_AMD.value:
             self.api.call(
                 "POST",
                 f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/fail",
-                {"error_message": "Unsupported job type for this agent", "error_code": "UNSUPPORTED_AGENT_JOB"},
+                {"error_message": "Unsupported job type for this agent", "error_code": "UNSUPPORTED_AGENT_JOB", "attempt": attempt},
             )
             return
-        self._log({"event": "claimed", "job_id": job_id})
+        self._log({"event": "claimed", "job_id": job_id, "attempt": attempt})
+        self._log({"event": "preparing", "job_id": job_id, "attempt": attempt})
+
+        stop_heartbeat = threading.Event()
+
+        def keep_claim_alive() -> None:
+            while not stop_heartbeat.wait(10.0):
+                try:
+                    self.api.call("POST", f"/api/v1/agents/{self.agent_id}/heartbeat", {})
+                    self._note_connection_restored()
+                except AgentApiError as exc:
+                    if exc.transient:
+                        self._connection_error(exc, job_id, attempt)
+                        continue
+                    self._log({"event": "terminal_error", "reason": str(exc)[:120], "job_id": job_id, "attempt": attempt})
+                    return
+
+        heartbeat_thread = threading.Thread(target=keep_claim_alive, name="rocmhub-agent-heartbeat", daemon=True)
+        heartbeat_thread.start()
 
         def emit(
             phase: str,
@@ -182,11 +316,16 @@ class ROCmHubAgent:
             error_code: Optional[str] = None,
             details: Optional[Dict[str, Any]] = None,
         ) -> JobEvent:
-            self.api.call(
-                "POST",
-                f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/events",
-                {"phase": phase, "status": status, "message": message, "details": details},
-            )
+            try:
+                self.api.call(
+                    "POST",
+                    f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/events",
+                    {"phase": phase, "status": status, "message": message, "details": details, "attempt": attempt},
+                )
+            except AgentApiError as exc:
+                if not exc.transient:
+                    raise
+                self._connection_error(exc, job_id, attempt)
             return cast(JobEvent, None)
 
         try:
@@ -201,37 +340,74 @@ class ROCmHubAgent:
                 job_id, JobType.FORGE_BUILD, local_payload, cancel, emit
             )
             if status == JobStatus.SUCCEEDED:
+                declared_artifacts = (result or {}).get("artifacts", {})
+                artifacts = self._prepare_artifact_upload(
+                    output_dir, declared_artifacts if isinstance(declared_artifacts, dict) else None
+                )
+                files = artifacts["files"]
+                count = len(files)
+                self._log({"event": "artifacts_ready", "job_id": job_id, "attempt": attempt, "count": count})
+                artifact_manifest = self._redact_local_paths(result)
                 enriched = {
                     "preparation": "PREPARE_MODEL_FOR_AMD",
                     "weights": "NOT_DOWNLOADED",
                     "target_gfx": payload.get("target_gfx"),
                     "runtime": payload.get("runtime"),
-                    "artifacts": (result or {}).get("artifacts", {}),
-                    "artifact_manifest": self._redact_local_paths(result),
+                    "artifacts": artifacts["artifacts"],
+                    "source_artifacts": artifacts["source_artifacts"],
+                    "artifact_provenance": artifacts["artifact_provenance"],
+                    "artifact_manifest": artifact_manifest,
                     "agent_observation": {
                         "physical_amd_execution": False,
                         "reason": "This Agent performed configuration preparation only.",
                     },
                 }
-                self.api.call(
-                    "POST",
-                    f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/complete",
-                    {
-                        "domain_status": domain or "CONFIG_ONLY",
-                        "result": enriched,
-                        "revision": revision,
-                        "artifact_files": self._small_artifact_files(output_dir),
-                    },
-                )
+                completion = {
+                    "domain_status": domain or "CONFIG_ONLY",
+                    "result": enriched,
+                    "revision": revision,
+                    "artifact_files": files,
+                    "attempt": attempt,
+                }
+                completion_id = hashlib.sha256(
+                    json.dumps(completion, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                ).hexdigest()
+                completion["completion_id"] = completion_id
+                self._log({"event": "uploading_artifacts", "job_id": job_id, "attempt": attempt, "count": count})
+                self._log({"event": "completing", "job_id": job_id, "attempt": attempt})
+                while True:
+                    try:
+                        self.api.call(
+                            "POST",
+                            f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/complete",
+                            completion,
+                        )
+                        break
+                    except AgentApiError as exc:
+                        if not exc.transient:
+                            raise
+                        self._connection_error(exc, job_id, attempt)
+                        stop_heartbeat.wait(self.poll_interval)
+                self._note_connection_restored()
+                self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": domain or "CONFIG_ONLY"})
             else:
                 self.api.call(
                     "POST",
                     f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/fail",
-                    {"error_message": error or "Preparation failed", "error_code": error_code or "PREPARATION_FAILED"},
+                    {"error_message": error or "Preparation failed", "error_code": error_code or "PREPARATION_FAILED", "attempt": attempt},
                 )
+                self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": "FAILED"})
+        except AgentApiError:
+            raise
         except Exception:
             self.api.call(
                 "POST",
                 f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/fail",
-                {"error_message": "Agent preparation failed", "error_code": "AGENT_EXECUTION_FAILED"},
+                {"error_message": "Agent preparation failed", "error_code": "AGENT_EXECUTION_FAILED", "attempt": attempt},
             )
+            self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": "FAILED"})
+        finally:
+            stop_heartbeat.set()
+            heartbeat_thread.join(timeout=1.0)
+            self._active_job = None
+            self._active_attempt = None

@@ -18,7 +18,9 @@ VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
 rocmhub agent start --server http://127.0.0.1:8000 --token "$ROCMHUB_AGENT_TOKENS" --name mac-dev-agent
 ```
 
-On macOS, `PREPARE_MODEL_FOR_AMD` is intentionally `CONFIG_ONLY` or `PREPARED`: it writes reproducible configuration, launcher, manifest, and hashes but does not claim AMD execution, validation, benchmarks, or download full weights. The Agent accepts only predefined ROCmHub jobs and never runs arbitrary shell commands from job input.
+On macOS without an AMD GPU, `PREPARE_MODEL_FOR_AMD` remains `CONFIG_ONLY` when weights are not materialized: it writes reproducible configuration and a launcher but does not claim AMD execution, validation, benchmarks, or downloaded weights. The Agent accepts only predefined ROCmHub jobs and never runs arbitrary shell commands from job input.
+
+The Agent emits bounded lifecycle records for claims, preparation, artifact upload, completion, and transient connection recovery; successful heartbeats remain silent. The result's `artifacts` hashes identify exact downloadable bytes, while `artifact_manifest` and `source_artifacts` retain Forge/source provenance. When privacy sanitization changes a JSON artifact to remove Agent-local paths, `artifact_provenance` records both hashes and the transition. Completion retries with the same completion ID are idempotent for that claim attempt, and stale attempts cannot complete a re-claimed job.
 
 For deployment, configure `PORT`, `ROCMHUB_DB_PATH`, `ROCMHUB_CORS_ORIGINS`, and `ROCMHUB_AGENT_TOKENS` through the environment. The frontend uses `VITE_API_BASE_URL` when it is set, and retains same-origin local development by default.
 

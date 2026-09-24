@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -53,6 +55,14 @@ def create_prepare(client: TestClient) -> str:
     return response.json()["job_id"]
 
 
+def with_completion_id(data: dict) -> dict:
+    completion = dict(data)
+    completion["completion_id"] = hashlib.sha256(
+        json.dumps(completion, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return completion
+
+
 def test_agent_registration_requires_valid_token(tmp_path: object) -> None:
     with make_client(tmp_path) as client:
         assert client.post("/api/v1/agents/register", json=payload()).status_code == 401
@@ -97,13 +107,132 @@ def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
         assert done.status_code == 204
         result = client.get(f"/api/v1/jobs/{job_id}/result").json()
         assert result["job_status"] == "SUCCEEDED"
-        assert result["result"]["artifacts"]["runtime_config.json"] == "abc"
         assert result["output_dir"] is None
         stored = result["result"]["server_artifacts"]
         assert stored[0]["name"] == "runtime_config.json"
         downloaded = client.get(stored[0]["download_path"])
         assert downloaded.status_code == 200
         assert downloaded.text == "{\"device\": \"cpu\"}\n"
+        downloaded_sha = hashlib.sha256(downloaded.content).hexdigest()
+        assert stored[0]["sha256"] == downloaded_sha
+        assert result["result"]["artifacts"]["runtime_config.json"] == downloaded_sha
+
+
+def test_agent_artifact_sanitization_provenance_and_download_hashes(tmp_path: object) -> None:
+    from rocmhub.agent.runtime import ROCmHubAgent
+
+    source_dir = Path(tmp_path) / "forge-output"  # type: ignore[arg-type]
+    source_dir.mkdir()
+    source_files = {
+        "runtime_config.json": b'{\n  "device": "cuda",\r\n  "weights_path": "/private/agent/cache/model"\r\n}\r\n',
+        "model_config.json": b'{ "model_type": "qwen2", "architectures": ["Qwen2ForCausalLM"] }\n',
+        "recipe.json": b'{"runtime":"pytorch_transformers_hip"}\n',
+        "run_inference.py": b"#!/usr/bin/env python3\r\nprint('ready')\r\n",
+    }
+    source_files["build_manifest.json"] = json.dumps(
+        {"artifacts": {"runtime_config.json": hashlib.sha256(source_files["runtime_config.json"]).hexdigest()}}
+    ).encode() + b"\n"
+    source_files["checksums.json"] = json.dumps(
+        {"files": {"runtime_config.json": hashlib.sha256(source_files["runtime_config.json"]).hexdigest()}}
+    ).encode() + b"\n"
+    for name, data in source_files.items():
+        (source_dir / name).write_bytes(data)
+    forge_hashes = {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in source_files.items()
+        if name in {"runtime_config.json", "model_config.json", "recipe.json", "run_inference.py"}
+    }
+    upload = ROCmHubAgent._prepare_artifact_upload(str(source_dir), forge_hashes)
+    stored_config_sha = hashlib.sha256(upload["files"]["runtime_config.json"].encode()).hexdigest()
+    assert json.loads(upload["files"]["build_manifest.json"])["artifacts"]["runtime_config.json"] == stored_config_sha
+    assert json.loads(upload["files"]["checksums.json"])["files"]["runtime_config.json"] == stored_config_sha
+
+    with make_client(tmp_path) as client:
+        client.app.state.config.artifact_storage_dir = Path(tmp_path) / "agent-artifacts"  # type: ignore[operator]
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"]
+        done = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json=with_completion_id({
+                "domain_status": "CONFIG_ONLY",
+                "attempt": claim["attempt"],
+                "result": {
+                    "artifacts": upload["artifacts"],
+                    "source_artifacts": upload["source_artifacts"],
+                    "artifact_provenance": upload["artifact_provenance"],
+                },
+                "artifact_files": upload["files"],
+            }),
+        )
+        assert done.status_code == 204
+        result = client.get(f"/api/v1/jobs/{job_id}/result").json()["result"]
+        server_artifacts = {item["name"]: item for item in result["server_artifacts"]}
+        for name, metadata in server_artifacts.items():
+            downloaded = client.get(metadata["download_path"])
+            assert downloaded.status_code == 200
+            assert hashlib.sha256(downloaded.content).hexdigest() == metadata["sha256"]
+            assert hashlib.sha256(downloaded.content).hexdigest() == result["artifacts"][name]
+            assert downloaded.content.decode("utf-8") == upload["files"][name]
+        assert result["artifact_provenance"]["runtime_config.json"]["source_sha256"] == hashlib.sha256(
+            source_files["runtime_config.json"]
+        ).hexdigest()
+        assert result["artifact_provenance"]["runtime_config.json"]["stored_sha256"] == server_artifacts[
+            "runtime_config.json"
+        ]["sha256"]
+        assert result["artifact_provenance"]["runtime_config.json"]["sanitized"] is True
+        assert result["artifact_provenance"]["model_config.json"]["sanitized"] is False
+        assert server_artifacts["run_inference.py"]["sha256"] == hashlib.sha256(
+            source_files["run_inference.py"]
+        ).hexdigest()
+        assert b"/private/agent" not in client.get(server_artifacts["runtime_config.json"]["download_path"]).content
+
+
+def test_stale_agent_attempt_cannot_complete_reclaimed_job(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        first_claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"]
+        assert first_claim["attempt"] == 1
+        assert job_id in client.app.state.job_manager.db.release_stale_claims(timeout_seconds=0)
+        second_claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"]
+        assert second_claim["attempt"] == 2
+        stale = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json=with_completion_id({
+                "domain_status": "CONFIG_ONLY",
+                "attempt": first_claim["attempt"],
+                "result": {},
+                "artifact_files": {"runtime_config.json": "{}\n"},
+            }),
+        )
+        assert stale.status_code == 409
+        assert client.get(f"/api/v1/jobs/{job_id}").json()["status"] == "RUNNING"
+        assert not (Path(tmp_path) / "agent-artifacts" / job_id / "runtime_config.json").exists()  # type: ignore[arg-type]
+
+
+def test_agent_completion_replay_is_idempotent(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"]
+        request = with_completion_id({
+            "domain_status": "CONFIG_ONLY",
+            "attempt": claim["attempt"],
+            "result": {"weights": "NOT_DOWNLOADED"},
+            "artifact_files": {"runtime_config.json": "{}\n"},
+        })
+        endpoint = f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete"
+        assert client.post(endpoint, headers=HEADERS, json=request).status_code == 204
+        assert client.post(endpoint, headers=HEADERS, json=request).status_code == 204
+        altered_replay = dict(request)
+        altered_replay["domain_status"] = "PREPARED"
+        assert client.post(endpoint, headers=HEADERS, json=altered_replay).status_code == 400
+        assert client.get(f"/api/v1/jobs/{job_id}").json()["status"] == "SUCCEEDED"
 
 
 def test_agent_artifact_upload_rejects_path_escape(tmp_path: object) -> None:

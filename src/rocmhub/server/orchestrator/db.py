@@ -345,17 +345,57 @@ class DatabaseManager:
             finally:
                 conn.close()
 
-    def agent_owns_running_job(self, agent_id: str, job_id: str) -> bool:
+    def agent_owns_running_job(self, agent_id: str, job_id: str, attempt: Optional[int] = None) -> bool:
         with self._lock:
             conn = self._get_connection()
             try:
-                return (
-                    conn.execute(
-                        "SELECT 1 FROM jobs WHERE job_id=? AND agent_id=? AND status=?",
-                        (job_id, agent_id, JobStatus.RUNNING.value),
-                    ).fetchone()
-                    is not None
-                )
+                query = "SELECT 1 FROM jobs WHERE job_id=? AND agent_id=? AND status=?"
+                params: tuple[Any, ...] = (job_id, agent_id, JobStatus.RUNNING.value)
+                if attempt is not None:
+                    query += " AND attempt=?"
+                    params += (attempt,)
+                return conn.execute(query, params).fetchone() is not None
+            finally:
+                conn.close()
+
+    def finish_agent_job(
+        self,
+        agent_id: str,
+        job_id: str,
+        attempt: Optional[int],
+        status: JobStatus,
+        *,
+        completed_at: str,
+        domain_status: Optional[str] = None,
+        result_payload: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+        error_code: Optional[str] = None,
+        revision: Optional[str] = None,
+    ) -> bool:
+        """Fence a remote agent's terminal update to its current claim attempt."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                updates = ["status=?", "completed_at=?"]
+                params: List[Any] = [status.value, completed_at]
+                for column, value in (
+                    ("domain_status", domain_status),
+                    ("result_payload", json.dumps(result_payload) if result_payload is not None else None),
+                    ("error_message", error_message),
+                    ("error_code", error_code),
+                    ("revision", revision),
+                ):
+                    if value is not None:
+                        updates.append(f"{column}=?")
+                        params.append(value)
+                query = f"UPDATE jobs SET {', '.join(updates)} WHERE job_id=? AND agent_id=? AND status=?"
+                params.extend((job_id, agent_id, JobStatus.RUNNING.value))
+                if attempt is not None:
+                    query += " AND attempt=?"
+                    params.append(attempt)
+                cursor = conn.execute(query, params)
+                conn.commit()
+                return cursor.rowcount == 1
             finally:
                 conn.close()
 

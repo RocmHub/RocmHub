@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
@@ -137,11 +138,20 @@ async def download_agent_artifact(
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' was not found.")
     declared = (result.result or {}).get("server_artifacts", [])
-    if artifact_name not in {item.get("name") for item in declared if isinstance(item, dict)}:
+    artifact = next(
+        (item for item in declared if isinstance(item, dict) and item.get("name") == artifact_name),
+        None,
+    )
+    if artifact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
     root = req.app.state.config.artifact_storage_dir.resolve()
-    target = (root / job_id / artifact_name).resolve()
-    if target.parent != (root / job_id).resolve() or not target.is_file():
+    job_dir = (root / job_id).resolve()
+    storage_key = artifact.get("storage_key", artifact_name)
+    relative_key = Path(storage_key) if isinstance(storage_key, str) else Path(artifact_name)
+    if relative_key.is_absolute() or any(part in {".", ".."} for part in relative_key.parts):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
+    target = (job_dir / relative_key).resolve()
+    if job_dir not in target.parents or target.name != artifact_name or not target.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
     return FileResponse(target, filename=artifact_name, media_type="application/octet-stream")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import uuid
 from pathlib import Path
@@ -31,7 +32,14 @@ _ALLOWED_ARTIFACT_FILES = {
 }
 
 
-def _store_agent_artifacts(root: Path, job_id: str, artifact_files: dict[str, str], max_bytes: int) -> list[dict[str, object]]:
+def _store_agent_artifacts(
+    root: Path,
+    job_id: str,
+    artifact_files: dict[str, str],
+    max_bytes: int,
+    attempt: Optional[int] = None,
+    completion_id: Optional[str] = None,
+) -> list[dict[str, object]]:
     """Store only known, small text artifacts below the configured storage root."""
     if not artifact_files:
         return []
@@ -42,7 +50,11 @@ def _store_agent_artifacts(root: Path, job_id: str, artifact_files: dict[str, st
     job_dir = (root / job_id).resolve()
     if job_dir.parent != root:
         raise ValueError("Invalid job artifact path")
-    job_dir.mkdir(parents=True, exist_ok=True)
+    scope = f"attempt-{attempt or 0}-{completion_id or uuid.uuid4().hex}"
+    attempt_dir = (job_dir / scope).resolve()
+    if attempt_dir.parent != job_dir:
+        raise ValueError("Invalid job artifact path")
+    attempt_dir.mkdir(parents=True, exist_ok=True)
     stored: list[dict[str, object]] = []
     for name, content in artifact_files.items():
         if name not in _ALLOWED_ARTIFACT_FILES or Path(name).name != name:
@@ -50,8 +62,8 @@ def _store_agent_artifacts(root: Path, job_id: str, artifact_files: dict[str, st
         encoded = content.encode("utf-8")
         if len(encoded) > max_bytes:
             raise ValueError(f"Agent artifact '{name}' exceeds the configured size limit")
-        target = (job_dir / name).resolve()
-        if target.parent != job_dir:
+        target = (attempt_dir / name).resolve()
+        if target.parent != attempt_dir:
             raise ValueError("Invalid Agent artifact path")
         temp_target = target.with_suffix(f"{target.suffix}.tmp")
         temp_target.write_bytes(encoded)
@@ -61,6 +73,7 @@ def _store_agent_artifacts(root: Path, job_id: str, artifact_files: dict[str, st
                 "name": name,
                 "bytes": len(encoded),
                 "sha256": hashlib.sha256(encoded).hexdigest(),
+                "storage_key": f"{scope}/{name}",
                 "download_path": f"/api/v1/jobs/{job_id}/artifacts/{name}",
             }
         )
@@ -147,7 +160,7 @@ async def event(
 ) -> None:
     _authorize(req, authorization)
     if not req.app.state.job_manager.agent_event(
-        agent_id, job_id, payload.phase, payload.status, payload.message, payload.details
+        agent_id, job_id, payload.phase, payload.status, payload.message, payload.details, payload.attempt
     ):
         raise HTTPException(status_code=409, detail="Agent does not own this running job")
 
@@ -161,20 +174,52 @@ async def complete(
     authorization: Optional[str] = Header(default=None),
 ) -> None:
     _authorize(req, authorization)
+    if payload.completion_id:
+        completion_body = payload.model_dump(mode="json", exclude={"completion_id"}, exclude_unset=True)
+        expected_id = hashlib.sha256(
+            json.dumps(completion_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        if not secrets.compare_digest(payload.completion_id, expected_id):
+            raise HTTPException(status_code=400, detail="Invalid completion identifier")
+    manager = req.app.state.job_manager
+    current = manager.db.get_job_full(job_id)
+    # A completion response may be lost after the transaction commits. Accept only
+    # an exact replay from the same agent; never turn an unrelated retry into success.
+    if (
+        current
+        and current.get("status") == "SUCCEEDED"
+        and current.get("agent_id") == agent_id
+        and payload.completion_id
+        and (current.get("result_payload") or {}).get("agent_completion_id") == payload.completion_id
+    ):
+        return
+    if not manager.db.agent_owns_running_job(agent_id, job_id, payload.attempt):
+        raise HTTPException(status_code=409, detail="Agent does not own this running job")
     try:
         stored = _store_agent_artifacts(
             req.app.state.config.artifact_storage_dir,
             job_id,
             payload.artifact_files,
             req.app.state.config.max_agent_artifact_bytes,
+            payload.attempt,
+            payload.completion_id,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid Agent artifact: {exc}") from exc
     result = dict(payload.result)
+    result["server_artifacts"] = stored
+    result["artifacts"] = {str(item["name"]): str(item["sha256"]) for item in stored}
     if stored:
-        result["server_artifacts"] = stored
-    if not req.app.state.job_manager.complete_agent_job(
-        agent_id, job_id, payload.domain_status, result, None, payload.revision
+        provenance = result.get("artifact_provenance")
+        if isinstance(provenance, dict):
+            for item in stored:
+                entry = provenance.get(str(item["name"]))
+                if isinstance(entry, dict):
+                    entry["stored_sha256"] = item["sha256"]
+    if payload.completion_id:
+        result["agent_completion_id"] = payload.completion_id
+    if not manager.complete_agent_job(
+        agent_id, job_id, payload.domain_status, result, payload.revision, payload.attempt
     ):
         raise HTTPException(status_code=409, detail="Agent does not own this running job")
 
@@ -188,5 +233,7 @@ async def fail(
     authorization: Optional[str] = Header(default=None),
 ) -> None:
     _authorize(req, authorization)
-    if not req.app.state.job_manager.fail_agent_job(agent_id, job_id, payload.error_message, payload.error_code):
+    if not req.app.state.job_manager.fail_agent_job(
+        agent_id, job_id, payload.error_message, payload.error_code, payload.attempt
+    ):
         raise HTTPException(status_code=409, detail="Agent does not own this running job")

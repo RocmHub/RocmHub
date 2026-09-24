@@ -14,6 +14,7 @@ class JobType(str, Enum):
     FORGE_BUILD = "FORGE_BUILD"
     ENGINEER = "ENGINEER"
     OPTIMIZATION = "OPTIMIZATION"
+    PREPARE_MODEL_FOR_AMD = "PREPARE_MODEL_FOR_AMD"
 
 
 class JobStatus(str, Enum):
@@ -57,6 +58,8 @@ class JobCreateRequest(BaseModel):
     max_disk_gb: Optional[int] = Field(
         default=None, ge=1, le=500, description="Max disk allowance in GB"
     )
+    target_gfx: Optional[str] = Field(default=None, max_length=64)
+    runtime: Optional[str] = Field(default="pytorch_transformers_hip", max_length=128)
 
 
 class JobResponse(BaseModel):
@@ -77,6 +80,72 @@ class JobResponse(BaseModel):
     output_dir: Optional[str] = None
     error_message: Optional[str] = None
     error_code: Optional[str] = None
+    agent_id: Optional[str] = None
+    claimed_at: Optional[str] = None
+    heartbeat_at: Optional[str] = None
+    attempt: int = 0
+
+
+class AgentStatus(str, Enum):
+    ONLINE = "ONLINE"
+    BUSY = "BUSY"
+    OFFLINE = "OFFLINE"
+    DEGRADED = "DEGRADED"
+
+
+class AgentCapabilities(BaseModel):
+    os: str
+    architecture: str
+    python_version: str
+    rocm_detected: bool = False
+    hip_detected: bool = False
+    pytorch_version: Optional[str] = None
+    amd_gpu_count: int = 0
+    gpu_names: List[str] = Field(default_factory=list)
+    gfx_targets: List[str] = Field(default_factory=list)
+    available_memory_mb: Optional[int] = None
+    available_disk_gb: Optional[float] = None
+    capabilities: List[str] = Field(default_factory=lambda: ["PREPARE_MODEL_FOR_AMD"])
+
+
+class AgentRegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    hostname: str = Field(min_length=1, max_length=255)
+    capabilities: AgentCapabilities
+
+
+class AgentResponse(BaseModel):
+    agent_id: str
+    name: str
+    hostname: str
+    status: AgentStatus
+    capabilities: AgentCapabilities
+    last_seen: str
+    created_at: str
+
+
+class AgentClaimResponse(BaseModel):
+    job: Optional[JobResponse] = None
+    request_payload: Optional[Dict[str, Any]] = None
+
+
+class AgentEventRequest(BaseModel):
+    phase: str = Field(min_length=1, max_length=64)
+    status: str = Field(min_length=1, max_length=32)
+    message: str = Field(min_length=1, max_length=2048)
+    details: Optional[Dict[str, Any]] = None
+
+
+class AgentCompleteRequest(BaseModel):
+    domain_status: str = Field(min_length=1, max_length=64)
+    result: Dict[str, Any]
+    output_dir: Optional[str] = None
+    revision: Optional[str] = None
+
+
+class AgentFailRequest(BaseModel):
+    error_message: str = Field(min_length=1, max_length=2048)
+    error_code: str = Field(default="AGENT_EXECUTION_FAILED", max_length=128)
 
 
 class JobEvent(BaseModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any, List, Optional
@@ -692,6 +693,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="127.0.0.1",
         help="Host address to bind server (default: '127.0.0.1').",
     )
+
+    agent_parser = subparsers.add_parser("agent", help="Run an external ROCmHub preparation Agent.")
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_action")
+    agent_start = agent_subparsers.add_parser("start", help="Register and poll the control plane for eligible jobs.")
+    agent_start.add_argument("--server", default=os.environ.get("ROCMHUB_AGENT_SERVER"), help="Control-plane base URL (or ROCMHUB_AGENT_SERVER).")
+    agent_start.add_argument("--token", default=os.environ.get("ROCMHUB_AGENT_TOKEN"), help="Agent token (or ROCMHUB_AGENT_TOKEN).")
+    agent_start.add_argument("--name", default=os.environ.get("ROCMHUB_AGENT_NAME", "rocmhub-agent"))
+    agent_start.add_argument("--workspace", default=os.environ.get("ROCMHUB_AGENT_WORKSPACE", str(Path.cwd() / "agent-workspace")))
+    agent_start.add_argument("--poll-interval", type=float, default=float(os.environ.get("ROCMHUB_AGENT_POLL_INTERVAL", "2")))
+    agent_start.add_argument("--max-concurrent-jobs", type=int, default=int(os.environ.get("ROCMHUB_AGENT_MAX_CONCURRENT_JOBS", "1")))
+    agent_start.add_argument("--json", action="store_true", help="Emit status records as JSON; never includes the token.")
     serve_parser.add_argument(
         "--port",
         type=int,
@@ -1950,6 +1962,21 @@ def main(args: Optional[List[str]] = None) -> int:
             return 1
         except Exception as exc:
             sys.stderr.write(f"Unexpected error in AI Engineer: {exc}\n")
+            return 1
+
+    if parsed_args.command == "agent":
+        if parsed_args.agent_action != "start" or not parsed_args.server or not parsed_args.token:
+            sys.stderr.write("Error: rocmhub agent start requires --server and --token (or ROCMHUB_AGENT_SERVER / ROCMHUB_AGENT_TOKEN).\n")
+            return 1
+        try:
+            from rocmhub.agent import ROCmHubAgent
+            agent = ROCmHubAgent(server=parsed_args.server, token=parsed_args.token, name=parsed_args.name, workspace=parsed_args.workspace, poll_interval=parsed_args.poll_interval, max_concurrent_jobs=parsed_args.max_concurrent_jobs, json_output=parsed_args.json)
+            agent.run_forever()
+            return 0
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:
+            sys.stderr.write(f"Agent error: {exc}\n")
             return 1
 
     elif parsed_args.command == "optimize":

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from rocmhub.server.config import ServerConfig
 from rocmhub.server.orchestrator.db import DatabaseManager
 from rocmhub.server.orchestrator.models import (
+    AgentCapabilities,
     JobCreateRequest,
     JobEvent,
     JobResponse,
@@ -44,16 +45,12 @@ class JobManager:
 
     def start(self) -> None:
         """Start the background worker thread and recover interrupted jobs."""
-        interrupted = self.db.mark_interrupted_jobs_as_failed(
-            "Job aborted due to server restart / unexpected shutdown"
-        )
+        interrupted = self.db.mark_interrupted_jobs_as_failed("Job aborted due to server restart / unexpected shutdown")
         if interrupted:
             logger.warning("Recovered and marked %d interrupted jobs as FAILED", len(interrupted))
 
         self._stop_event.clear()
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop, name="rocmhub-job-worker", daemon=True
-        )
+        self._worker_thread = threading.Thread(target=self._worker_loop, name="rocmhub-job-worker", daemon=True)
         self._worker_thread.start()
         logger.info("JobManager started with SQLite at %s", self.config.db_path)
 
@@ -110,11 +107,102 @@ class JobManager:
             details={"model_id": request.model_id, "timeout_seconds": timeout},
         )
 
-        # 5. Place in worker queue
+        # 5. Existing jobs use the in-process worker. Remote preparation jobs are
+        # deliberately left queued for an external authenticated Agent.
         self._cancellation_events[job_id] = threading.Event()
-        self._work_queue.put(job_id)
+        if request.job_type != JobType.PREPARE_MODEL_FOR_AMD:
+            self._work_queue.put(job_id)
 
         return job_resp
+
+    def claim_agent_job(
+        self, agent_id: str, capabilities: AgentCapabilities
+    ) -> Optional[Tuple[JobResponse, Dict[str, Any]]]:
+        """Atomically assign one honest, eligible queued job to an external Agent."""
+        released = self.db.release_stale_claims(self.config.agent_heartbeat_timeout_seconds)
+        for job_id in released:
+            self.emit_event(
+                job_id,
+                "AGENT_LOST",
+                "QUEUED",
+                "Agent heartbeat timed out; job released for reassignment.",
+                "AGENT_HEARTBEAT_TIMEOUT",
+            )
+        can_execute_amd = (
+            capabilities.os.lower() == "linux"
+            and capabilities.rocm_detected
+            and capabilities.hip_detected
+            and capabilities.amd_gpu_count > 0
+        )
+        result = self.db.claim_next_job(agent_id, capabilities.capabilities, can_execute_amd)
+        if result:
+            job, _ = result
+            self.emit_event(
+                job.job_id,
+                "CLAIMED",
+                "RUNNING",
+                f"Claimed by agent {agent_id}",
+                details={"agent_id": agent_id, "attempt": job.attempt},
+            )
+        return result
+
+    def agent_heartbeat(self, agent_id: str) -> bool:
+        return self.db.heartbeat_agent(agent_id)
+
+    def agent_event(
+        self,
+        agent_id: str,
+        job_id: str,
+        phase: str,
+        status: str,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        if not self.db.agent_owns_running_job(agent_id, job_id):
+            return False
+        self.db.heartbeat_agent(agent_id)
+        self.emit_event(job_id, phase, status, message, details=details)
+        return True
+
+    def complete_agent_job(
+        self,
+        agent_id: str,
+        job_id: str,
+        domain_status: str,
+        result: Dict[str, Any],
+        output_dir: Optional[str],
+        revision: Optional[str],
+    ) -> bool:
+        if not self.db.agent_owns_running_job(agent_id, job_id):
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        self.db.update_job_status(
+            job_id,
+            JobStatus.SUCCEEDED,
+            completed_at=now,
+            domain_status=domain_status,
+            result_payload=result,
+            output_dir=output_dir,
+            revision=revision,
+        )
+        self.emit_event(
+            job_id,
+            "COMPLETED",
+            "SUCCEEDED",
+            "External agent preparation completed",
+            details={"agent_id": agent_id, "domain_status": domain_status},
+        )
+        return True
+
+    def fail_agent_job(self, agent_id: str, job_id: str, error_message: str, error_code: str) -> bool:
+        if not self.db.agent_owns_running_job(agent_id, job_id):
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        self.db.update_job_status(
+            job_id, JobStatus.FAILED, completed_at=now, error_message=error_message, error_code=error_code
+        )
+        self.emit_event(job_id, "COMPLETED", "FAILED", "External agent job failed", error_code)
+        return True
 
     def get_job(self, job_id: str) -> Optional[JobResponse]:
         """Get job status and metadata."""
@@ -284,11 +372,25 @@ class JobManager:
                 started_at=started_at,
             )
 
-            def emit(phase: str, status: str, msg: str, err_code: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> JobEvent:
+            def emit(
+                phase: str,
+                status: str,
+                msg: str,
+                err_code: Optional[str] = None,
+                details: Optional[Dict[str, Any]] = None,
+            ) -> JobEvent:
                 return self.emit_event(job_id, phase, status, msg, err_code, details)
 
             try:
-                job_status, domain_status, resolved_output_dir, result_payload, error_msg, error_code, resolved_revision = execute_job(
+                (
+                    job_status,
+                    domain_status,
+                    resolved_output_dir,
+                    result_payload,
+                    error_msg,
+                    error_code,
+                    resolved_revision,
+                ) = execute_job(
                     job_id=job_id,
                     job_type=JobType(job_data["job_type"]),
                     request_data=job_data["request_payload"],

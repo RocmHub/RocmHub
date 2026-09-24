@@ -10,7 +10,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from rocmhub.server.orchestrator.migrations import apply_migrations
-from rocmhub.server.orchestrator.models import JobEvent, JobResponse, JobStatus, JobType
+from rocmhub.server.orchestrator.models import (
+    AgentCapabilities,
+    AgentResponse,
+    AgentStatus,
+    JobEvent,
+    JobResponse,
+    JobStatus,
+    JobType,
+)
 
 
 class DatabaseManager:
@@ -39,6 +47,28 @@ class DatabaseManager:
                 apply_migrations(conn)
             finally:
                 conn.close()
+
+    @staticmethod
+    def _job_response(row: sqlite3.Row) -> JobResponse:
+        return JobResponse(
+            job_id=row["job_id"],
+            job_type=JobType(row["job_type"]),
+            model_id=row["model_id"],
+            revision=row["revision"],
+            status=JobStatus(row["status"]),
+            domain_status=row["domain_status"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            timeout_seconds=row["timeout_seconds"],
+            output_dir=row["output_dir"],
+            error_message=row["error_message"],
+            error_code=row["error_code"],
+            agent_id=row["agent_id"] if "agent_id" in row.keys() else None,
+            claimed_at=row["claimed_at"] if "claimed_at" in row.keys() else None,
+            heartbeat_at=row["heartbeat_at"] if "heartbeat_at" in row.keys() else None,
+            attempt=row["attempt"] if "attempt" in row.keys() else 0,
+        )
 
     def insert_job(
         self,
@@ -84,20 +114,15 @@ class DatabaseManager:
                     ),
                 )
                 conn.commit()
-                return JobResponse(
+                return self.get_job(job_id) or JobResponse(
                     job_id=job_id,
                     job_type=job_type,
                     model_id=model_id,
                     revision=revision,
                     status=status,
-                    domain_status=None,
                     created_at=created_at,
-                    started_at=None,
-                    completed_at=None,
                     timeout_seconds=timeout_seconds,
                     output_dir=output_dir,
-                    error_message=None,
-                    error_code=None,
                 )
             finally:
                 conn.close()
@@ -112,21 +137,7 @@ class DatabaseManager:
                 row = cursor.fetchone()
                 if not row:
                     return None
-                return JobResponse(
-                    job_id=row["job_id"],
-                    job_type=JobType(row["job_type"]),
-                    model_id=row["model_id"],
-                    revision=row["revision"],
-                    status=JobStatus(row["status"]),
-                    domain_status=row["domain_status"],
-                    created_at=row["created_at"],
-                    started_at=row["started_at"],
-                    completed_at=row["completed_at"],
-                    timeout_seconds=row["timeout_seconds"],
-                    output_dir=row["output_dir"],
-                    error_message=row["error_message"],
-                    error_code=row["error_code"],
-                )
+                return self._job_response(row)
             finally:
                 conn.close()
 
@@ -199,6 +210,180 @@ class DatabaseManager:
                 query = f"UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?"
                 cursor.execute(query, params)
                 conn.commit()
+            finally:
+                conn.close()
+
+    def upsert_agent(
+        self, agent_id: str, name: str, hostname: str, capabilities: AgentCapabilities, token_hash: str
+    ) -> AgentResponse:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    """INSERT INTO agents(agent_id,name,hostname,status,capabilities,token_hash,last_seen,created_at)
+                VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET name=excluded.name,hostname=excluded.hostname,status='ONLINE',capabilities=excluded.capabilities,token_hash=excluded.token_hash,last_seen=excluded.last_seen""",
+                    (
+                        agent_id,
+                        name,
+                        hostname,
+                        AgentStatus.ONLINE.value,
+                        capabilities.model_dump_json(),
+                        token_hash,
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+                return AgentResponse(
+                    agent_id=agent_id,
+                    name=name,
+                    hostname=hostname,
+                    status=AgentStatus.ONLINE,
+                    capabilities=capabilities,
+                    last_seen=now,
+                    created_at=now,
+                )
+            finally:
+                conn.close()
+
+    def revoke_agent_token(self, token_hash: str) -> None:
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO revoked_agent_tokens(token_hash,revoked_at) VALUES(?,?)",
+                    (token_hash, datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def is_agent_token_revoked(self, token_hash: str) -> bool:
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                return (
+                    conn.execute("SELECT 1 FROM revoked_agent_tokens WHERE token_hash=?", (token_hash,)).fetchone()
+                    is not None
+                )
+            finally:
+                conn.close()
+
+    def list_agents(self) -> List[AgentResponse]:
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute("SELECT * FROM agents ORDER BY last_seen DESC").fetchall()
+                return [
+                    AgentResponse(
+                        agent_id=r["agent_id"],
+                        name=r["name"],
+                        hostname=r["hostname"],
+                        status=AgentStatus(r["status"]),
+                        capabilities=AgentCapabilities.model_validate_json(r["capabilities"]),
+                        last_seen=r["last_seen"],
+                        created_at=r["created_at"],
+                    )
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+    def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
+        return next((a for a in self.list_agents() if a.agent_id == agent_id), None)
+
+    def heartbeat_agent(self, agent_id: str) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("UPDATE agents SET last_seen=?, status='ONLINE' WHERE agent_id=?", (now, agent_id))
+                conn.execute(
+                    "UPDATE jobs SET heartbeat_at=? WHERE agent_id=? AND status=?",
+                    (now, agent_id, JobStatus.RUNNING.value),
+                )
+                conn.commit()
+                return cur.rowcount == 1
+            finally:
+                conn.close()
+
+    def claim_next_job(
+        self, agent_id: str, capability_names: List[str], can_execute_amd: bool
+    ) -> Optional[Tuple[JobResponse, Dict[str, Any]]]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    "SELECT * FROM jobs WHERE status=? ORDER BY created_at ASC", (JobStatus.QUEUED.value,)
+                ).fetchall()
+                for row in rows:
+                    payload = json.loads(row["request_payload"])
+                    job_type = row["job_type"]
+                    required_amd = job_type in ("AMD_EXECUTION", "BENCHMARK") or bool(
+                        payload.get("require_amd_execution")
+                    )
+                    eligible = (
+                        job_type == JobType.PREPARE_MODEL_FOR_AMD.value
+                        and "PREPARE_MODEL_FOR_AMD" in capability_names
+                        and not required_amd
+                    ) or (required_amd and can_execute_amd)
+                    if not eligible:
+                        continue
+                    cur = conn.execute(
+                        "UPDATE jobs SET status=?,agent_id=?,claimed_at=?,heartbeat_at=?,started_at=?,attempt=attempt+1 WHERE job_id=? AND status=?",
+                        (JobStatus.RUNNING.value, agent_id, now, now, now, row["job_id"], JobStatus.QUEUED.value),
+                    )
+                    if cur.rowcount:
+                        claimed = conn.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+                        conn.commit()
+                        return self._job_response(claimed), payload
+                conn.commit()
+                return None
+            finally:
+                conn.close()
+
+    def agent_owns_running_job(self, agent_id: str, job_id: str) -> bool:
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                return (
+                    conn.execute(
+                        "SELECT 1 FROM jobs WHERE job_id=? AND agent_id=? AND status=?",
+                        (job_id, agent_id, JobStatus.RUNNING.value),
+                    ).fetchone()
+                    is not None
+                )
+            finally:
+                conn.close()
+
+    def release_stale_claims(self, timeout_seconds: int) -> List[str]:
+        from datetime import timedelta
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT job_id FROM jobs WHERE status=? AND heartbeat_at IS NOT NULL AND heartbeat_at < ?",
+                    (JobStatus.RUNNING.value, cutoff),
+                ).fetchall()
+                ids = [r[0] for r in rows]
+                conn.execute("UPDATE agents SET status=? WHERE last_seen < ?", (AgentStatus.OFFLINE.value, cutoff))
+                for job_id in ids:
+                    conn.execute(
+                        "UPDATE jobs SET status=?,agent_id=NULL,claimed_at=NULL,heartbeat_at=NULL,error_message=?,error_code=? WHERE job_id=?",
+                        (
+                            JobStatus.QUEUED.value,
+                            "Agent heartbeat timed out; job released for another eligible agent.",
+                            "AGENT_HEARTBEAT_TIMEOUT",
+                            job_id,
+                        ),
+                    )
+                conn.commit()
+                return ids
             finally:
                 conn.close()
 
@@ -291,14 +476,34 @@ class DatabaseManager:
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT job_id, status FROM jobs WHERE status IN (?, ?)",
+                    "SELECT job_id, status, agent_id FROM jobs WHERE status IN (?, ?)",
                     (JobStatus.QUEUED.value, JobStatus.RUNNING.value),
                 )
                 interrupted_rows = cursor.fetchall()
                 interrupted_ids = [row[0] for row in interrupted_rows]
                 now_iso = datetime.now(timezone.utc).isoformat()
 
-                for jid, st in interrupted_rows:
+                for jid, st, agent_id in interrupted_rows:
+                    if agent_id:
+                        cursor.execute(
+                            "UPDATE jobs SET status=?, agent_id=NULL, claimed_at=NULL, heartbeat_at=NULL WHERE job_id=?",
+                            (JobStatus.QUEUED.value, jid),
+                        )
+                        cursor.execute("SELECT COALESCE(MAX(sequence), 0) + 1 FROM job_events WHERE job_id = ?", (jid,))
+                        seq = cursor.fetchone()[0]
+                        cursor.execute(
+                            "INSERT INTO job_events(job_id,sequence,timestamp,phase,status,message,error_code) VALUES(?,?,?,?,?,?,?)",
+                            (
+                                jid,
+                                seq,
+                                now_iso,
+                                "SYSTEM",
+                                "QUEUED",
+                                "Server restarted; remote agent claim released for safe reassignment.",
+                                "AGENT_CLAIM_RELEASED_ON_RESTART",
+                            ),
+                        )
+                        continue
                     if st == JobStatus.RUNNING.value:
                         err_code = "EXECUTION_INTERRUPTED_BY_RESTART"
                         err_msg = (
@@ -367,9 +572,7 @@ class DatabaseManager:
                 total = cursor.fetchone()[0]
 
                 # Select paginated results
-                select_query = (
-                    f"SELECT * FROM jobs {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
+                select_query = f"SELECT * FROM jobs {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
                 cursor.execute(select_query, params + [limit, offset])
                 rows = cursor.fetchall()
 

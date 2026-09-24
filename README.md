@@ -1,5 +1,27 @@
 # ROCmHub
 
+## External Agent quickstart
+
+The control plane keeps lightweight job state; model preparation runs on a separately started ROCmHub Agent. The same protocol works on a macOS preparation host and a future Linux ROCm host.
+
+```bash
+# Terminal A — control plane (set a non-default value outside local development)
+export ROCMHUB_AGENT_TOKENS='replace-with-a-long-random-token'
+export ROCMHUB_DB_PATH="$PWD/.rocmhub/jobs.db"
+rocmhub serve --host 127.0.0.1 --port 8000
+
+# Terminal B — frontend
+cd frontend
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+
+# Terminal C — agent. The token is never printed by the Agent.
+rocmhub agent start --server http://127.0.0.1:8000 --token "$ROCMHUB_AGENT_TOKENS" --name mac-dev-agent
+```
+
+On macOS, `PREPARE_MODEL_FOR_AMD` is intentionally `CONFIG_ONLY` or `PREPARED`: it writes reproducible configuration, launcher, manifest, and hashes but does not claim AMD execution, validation, benchmarks, or download full weights. The Agent accepts only predefined ROCmHub jobs and never runs arbitrary shell commands from job input.
+
+For deployment, configure `PORT`, `ROCMHUB_DB_PATH`, `ROCMHUB_CORS_ORIGINS`, and `ROCMHUB_AGENT_TOKENS` through the environment. The frontend uses `VITE_API_BASE_URL` when it is set, and retains same-origin local development by default.
+
 > Open-source tooling and engineering platform for preparing, benchmarking, validating, and optimizing AI models for AMD ROCm.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from rocmhub.core.errors import ROCmHubError
 from rocmhub.server.config import ServerConfig
 from rocmhub.server.orchestrator.manager import JobManager
-from rocmhub.server.routes import forge_router, health_router, jobs_router, models_router
+from rocmhub.server.routes import agents_router, forge_router, health_router, jobs_router, models_router
 from rocmhub.server.security import RequestSizeLimitMiddleware
 
 
@@ -84,5 +84,6 @@ def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
     app.include_router(models_router)
     app.include_router(forge_router)
     app.include_router(jobs_router)
+    app.include_router(agents_router)
 
     return app

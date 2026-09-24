@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchHealth, fetchJobs } from './api/client';
+import { fetchAgents, fetchHealth, fetchJobs } from './api/client';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar, type NavTab } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -64,6 +64,7 @@ export const App: React.FC = () => {
     queryFn: fetchHealth,
     refetchInterval: 10000,
   });
+  const {data: agents} = useQuery({queryKey:['agents'],queryFn:fetchAgents,refetchInterval:10000});
 
   const {
     data: jobsList,
@@ -126,6 +127,7 @@ export const App: React.FC = () => {
                 isLoadingJobs={isLoadingJobs}
                 onNavigate={switchTab}
                 onSelectJob={handleSelectJob}
+                agents={agents ?? []}
               />
             )}
             {activeTab === 'explorer' && (

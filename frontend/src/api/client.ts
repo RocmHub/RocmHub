@@ -9,8 +9,9 @@ import type {
   JobType,
   ModelMetadata,
 } from './types';
+import type { AgentInfo } from './types';
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export class ApiError extends Error {
   status: number;
@@ -111,3 +112,5 @@ export async function cancelJob(jobId: string): Promise<{ job_id: string; cancel
     { method: 'POST' }
   );
 }
+
+export async function fetchAgents(): Promise<AgentInfo[]> { return request<AgentInfo[]>('/api/v1/agents'); }

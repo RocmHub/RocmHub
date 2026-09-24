@@ -50,8 +50,36 @@ CREATE INDEX IF NOT EXISTS idx_job_events_job_seq ON job_events(job_id, sequence
 CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
 """
 
+MIGRATION_2_SQL = """
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    hostname TEXT NOT NULL,
+    status TEXT NOT NULL,
+    capabilities TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+ALTER TABLE jobs ADD COLUMN agent_id TEXT;
+ALTER TABLE jobs ADD COLUMN claimed_at TEXT;
+ALTER TABLE jobs ADD COLUMN heartbeat_at TEXT;
+ALTER TABLE jobs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_jobs_agent_claim ON jobs(agent_id, status);
+"""
+
+MIGRATION_3_SQL = """
+CREATE TABLE IF NOT EXISTS revoked_agent_tokens (
+    token_hash TEXT PRIMARY KEY,
+    revoked_at TEXT NOT NULL
+);
+"""
+
 MIGRATIONS: List[Tuple[int, str, str]] = [
     (1, "001_initial_schema", MIGRATION_1_SQL),
+    (2, "002_external_agents", MIGRATION_2_SQL),
+    (3, "003_agent_token_revocation", MIGRATION_3_SQL),
 ]
 
 

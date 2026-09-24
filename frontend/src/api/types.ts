@@ -1,4 +1,4 @@
-export type JobType = 'FORGE_BUILD' | 'ENGINEER' | 'OPTIMIZATION';
+export type JobType = 'FORGE_BUILD' | 'ENGINEER' | 'OPTIMIZATION' | 'PREPARE_MODEL_FOR_AMD';
 
 export type JobStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
@@ -148,4 +148,8 @@ export interface JobCreatePayload {
   max_candidates?: number;
   max_attempts?: number;
   max_disk_gb?: number;
+  target_gfx?: string;
+  runtime?: string;
 }
+
+export interface AgentInfo {agent_id:string;name:string;hostname:string;status:'ONLINE'|'BUSY'|'OFFLINE'|'DEGRADED';last_seen:string;capabilities:{rocm_detected:boolean;hip_detected:boolean;amd_gpu_count:number;gpu_names:string[];capabilities:string[]}}

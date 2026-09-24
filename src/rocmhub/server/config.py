@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import List
@@ -39,6 +40,8 @@ class ServerConfig(BaseModel):
         default=1800, ge=10, le=86400, description="Default job timeout in seconds"
     )
     cors_origins: List[str] = Field(
-        default_factory=lambda: ["http://127.0.0.1:3000", "http://localhost:3000"],
+        default_factory=lambda: [v.strip() for v in os.environ.get("ROCMHUB_CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:5173,http://localhost:5173").split(",") if v.strip()],
         description="Allowed CORS origins for local web development",
     )
+    agent_heartbeat_timeout_seconds: int = Field(default_factory=lambda: int(os.environ.get("ROCMHUB_AGENT_HEARTBEAT_TIMEOUT_SECONDS", "45")), ge=5, le=3600)
+    agent_token_hashes: List[str] = Field(default_factory=lambda: [hashlib.sha256(token.encode()).hexdigest() for token in os.environ.get("ROCMHUB_AGENT_TOKENS", "rocmhub-dev-agent-token").split(",") if token])

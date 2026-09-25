@@ -259,6 +259,21 @@ class JobManager:
         if cancel_evt:
             cancel_evt.set()
 
+        # Remote Agents cannot share the server's in-process cancellation event.
+        # Fence the claim immediately; the Agent's bounded status checks then stop
+        # cache publication and its terminal request cannot overwrite cancellation.
+        if job.agent_id and job.status == JobStatus.RUNNING:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            self.db.update_job_status(
+                job_id=job_id,
+                status=JobStatus.CANCELLED,
+                completed_at=now_iso,
+                error_message="Job cancelled by user request",
+                error_code="JOB_CANCELLED",
+            )
+            self.emit_event(job_id, "CANCELLATION", "CANCELLED", "Remote preparation cancelled by user", "JOB_CANCELLED")
+            return True
+
         # If queued, immediately transition to CANCELLED in DB
         if job.status == JobStatus.QUEUED:
             now_iso = datetime.now(timezone.utc).isoformat()

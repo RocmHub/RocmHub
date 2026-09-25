@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from rocmhub.forge.materializer import ModelMaterializer
 from rocmhub.hardware.detector import SystemObserver
 from rocmhub.server.orchestrator.models import JobEvent, JobStatus, JobType
 from rocmhub.server.orchestrator.worker import execute_job
@@ -119,8 +120,9 @@ class ROCmHubAgent:
                 text = str(event.get("agent_id", ""))
             elif name == "claimed":
                 text = f"{job_id} attempt={attempt}"
-            elif name == "preparing" or name == "completing":
-                text = str(job_id or "")
+            elif name in {"preparing", "completing", "checking_disk", "cache_miss", "downloading_model", "verifying_cache", "cache_hit", "cache_verified", "model_materialized", "cancelled"}:
+                byte_count = event.get("materialized_bytes", event.get("estimated_bytes"))
+                text = f"{job_id} bytes={byte_count}" if byte_count is not None else str(job_id or "")
             elif name in {"artifacts_ready", "uploading_artifacts"}:
                 text = f"{job_id} count={event.get('count', 0)}"
             elif name == "completed":
@@ -290,7 +292,6 @@ class ROCmHubAgent:
             )
             return
         self._log({"event": "claimed", "job_id": job_id, "attempt": attempt})
-        self._log({"event": "preparing", "job_id": job_id, "attempt": attempt})
 
         stop_heartbeat = threading.Event()
 
@@ -324,21 +325,74 @@ class ROCmHubAgent:
                 )
             except AgentApiError as exc:
                 if not exc.transient:
+                    if cancel.is_set() and str(exc) == "HTTP 409":
+                        return cast(JobEvent, None)
                     raise
                 self._connection_error(exc, job_id, attempt)
             return cast(JobEvent, None)
 
         try:
+            cancel = threading.Event()
+
+            def progress(phase: str, details: Dict[str, object]) -> None:
+                event_names = {
+                    "CACHE_MISS": ("cache_miss", "MATERIALIZATION", "Cache miss; downloading immutable model snapshot"),
+                    "DOWNLOADING_MODEL": ("downloading_model", "DOWNLOADING", "Downloading model files to the connected Agent"),
+                    "VERIFYING_CACHE": ("verifying_cache", "VERIFYING", "Verifying materialized model files"),
+                    "MODEL_MATERIALIZED": ("model_materialized", "PREPARING", "Model files materialized and verified"),
+                    "CACHE_HIT": ("cache_hit", "VERIFYING", "Existing managed cache entry verified"),
+                }
+                mapped = event_names.get(phase)
+                if not mapped:
+                    return
+                event_name, event_phase, message = mapped
+                safe_details = {k: v for k, v in details.items() if k in {"estimated_bytes", "materialized_bytes"}}
+                self._log({"event": event_name, "job_id": job_id, **safe_details})
+                if phase == "CACHE_HIT":
+                    self._log({"event": "cache_verified", "job_id": job_id, **safe_details})
+                emit(event_phase, "RUNNING", message, None, safe_details)
+
+            def cancellation_requested() -> bool:
+                try:
+                    state = self.api.call("GET", f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/status")
+                except AgentApiError as exc:
+                    if exc.transient:
+                        self._connection_error(exc, job_id, attempt)
+                        return False
+                    raise
+                if state.get("status") == JobStatus.CANCELLED.value:
+                    cancel.set()
+                    self._log({"event": "cancelled", "job_id": job_id})
+                    return True
+                return False
+
+            mode = payload.get("materialization_mode", "METADATA_ONLY")
+            materializer = None
+            if mode == "FULL_WEIGHTS" and payload.get("weights_consent") is True:
+                self._log({"event": "checking_disk", "job_id": job_id})
+                emit("CHECKING_DISK", "RUNNING", "Checking Agent-local storage before model download", None, None)
+                materializer = ModelMaterializer(
+                    cache_dir=self.workspace / "cache",
+                    managed_cache=True,
+                    progress_callback=progress,
+                    cancellation_check=cancellation_requested,
+                )
+            else:
+                self._log({"event": "preparing", "job_id": job_id})
             local_payload = {
                 **payload,
                 "output_dir": str(self.workspace / job_id),
                 "allow_full_weights": False,
                 "execute_inference": False,
             }
-            cancel = threading.Event()
-            status, domain, output_dir, result, error, error_code, revision = execute_job(
-                job_id, JobType.FORGE_BUILD, local_payload, cancel, emit
-            )
+            if materializer is None:
+                status, domain, output_dir, result, error, error_code, revision = execute_job(
+                    job_id, JobType.PREPARE_MODEL_FOR_AMD, local_payload, cancel, emit
+                )
+            else:
+                status, domain, output_dir, result, error, error_code, revision = execute_job(
+                    job_id, JobType.PREPARE_MODEL_FOR_AMD, local_payload, cancel, emit, materializer
+                )
             if status == JobStatus.SUCCEEDED:
                 declared_artifacts = (result or {}).get("artifacts", {})
                 artifacts = self._prepare_artifact_upload(
@@ -350,7 +404,12 @@ class ROCmHubAgent:
                 artifact_manifest = self._redact_local_paths(result)
                 enriched = {
                     "preparation": "PREPARE_MODEL_FOR_AMD",
-                    "weights": "NOT_DOWNLOADED",
+                    "model_id": payload.get("model_id"),
+                    "revision": revision,
+                    "weights": "MATERIALIZED" if (result or {}).get("materialization", {}).get("has_weights") else "NOT_DOWNLOADED",
+                    "materialization": (result or {}).get("materialization", {}),
+                    "materialization_mode": payload.get("materialization_mode", "METADATA_ONLY"),
+                    "amd_validated": False,
                     "target_gfx": payload.get("target_gfx"),
                     "runtime": payload.get("runtime"),
                     "artifacts": artifacts["artifacts"],
@@ -359,7 +418,7 @@ class ROCmHubAgent:
                     "artifact_manifest": artifact_manifest,
                     "agent_observation": {
                         "physical_amd_execution": False,
-                        "reason": "This Agent performed configuration preparation only.",
+                        "reason": "Preparation completed without AMD inference or validation.",
                     },
                 }
                 completion = {
@@ -391,12 +450,13 @@ class ROCmHubAgent:
                 self._note_connection_restored()
                 self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": domain or "CONFIG_ONLY"})
             else:
-                self.api.call(
-                    "POST",
-                    f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/fail",
-                    {"error_message": error or "Preparation failed", "error_code": error_code or "PREPARATION_FAILED", "attempt": attempt},
-                )
-                self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": "FAILED"})
+                if status != JobStatus.CANCELLED:
+                    self.api.call(
+                        "POST",
+                        f"/api/v1/agents/{self.agent_id}/jobs/{job_id}/fail",
+                        {"error_message": "Agent preparation failed; inspect local Agent diagnostics.", "error_code": error_code or "PREPARATION_FAILED", "attempt": attempt},
+                    )
+                self._log({"event": "completed", "job_id": job_id, "attempt": attempt, "status": status.value})
         except AgentApiError:
             raise
         except Exception:

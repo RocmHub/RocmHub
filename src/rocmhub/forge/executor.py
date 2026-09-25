@@ -200,6 +200,9 @@ class ForgeExecutor:
                         "mode": materialized.mode.value,
                         "has_weights": materialized.has_weights,
                         "cached": materialized.cached,
+                        "cache_status": materialized.cache_status or ("HIT_UNVERIFIED" if materialized.cached else "MISS"),
+                        "integrity": materialized.integrity,
+                        "materialized_bytes": materialized.materialized_bytes,
                     },
                 )
             )
@@ -760,4 +763,3 @@ class ForgeExecutor:
                 json.dump(data, f, indent=2)
         except Exception:
             pass
-

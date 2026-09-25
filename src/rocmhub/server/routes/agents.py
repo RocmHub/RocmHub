@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import uuid
 from pathlib import Path
@@ -30,6 +31,24 @@ _ALLOWED_ARTIFACT_FILES = {
     "run_inference.py",
     "runtime_config.json",
 }
+
+_PRIVATE_PATH_PATTERN = re.compile(
+    r"(?<!:)/(?:Users|home|root|private|tmp|var|Volumes|mnt|opt|usr|etc|srv|app|workspace|agent-workspace)/"
+)
+
+
+def _contains_agent_local_path(value: object) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in {"build_dir", "output_dir", "weights_path", "cache_path", "local_path"} and item is not None:
+                return True
+            if _contains_agent_local_path(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_agent_local_path(item) for item in value)
+    elif isinstance(value, str):
+        return bool(_PRIVATE_PATH_PATTERN.search(value))
+    return False
 
 
 def _store_agent_artifacts(
@@ -137,6 +156,16 @@ async def heartbeat(agent_id: str, req: Request, authorization: Optional[str] = 
     return cast(AgentResponse, agent)
 
 
+@router.get("/{agent_id}/jobs/{job_id}/status")
+async def agent_job_status(agent_id: str, job_id: str, req: Request, authorization: Optional[str] = Header(default=None)) -> dict[str, str]:
+    """Allow the authenticated claim owner to observe cancellation while materializing."""
+    _authorize(req, authorization)
+    job = req.app.state.job_manager.db.get_job_full(job_id)
+    if not job or job.get("agent_id") != agent_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": str(job["status"])}
+
+
 @router.post("/{agent_id}/claim", response_model=AgentClaimResponse)
 async def claim(agent_id: str, req: Request, authorization: Optional[str] = Header(default=None)) -> AgentClaimResponse:
     _authorize(req, authorization)
@@ -195,6 +224,44 @@ async def complete(
         return
     if not manager.db.agent_owns_running_job(agent_id, job_id, payload.attempt):
         raise HTTPException(status_code=409, detail="Agent does not own this running job")
+    if current and current.get("job_type") == "PREPARE_MODEL_FOR_AMD":
+        if _contains_agent_local_path(payload.result):
+            raise HTTPException(status_code=400, detail="Agent-local filesystem paths are not accepted in job results")
+        request_payload = current.get("request_payload") or {}
+        intent = request_payload.get("materialization_mode", "METADATA_ONLY")
+        if payload.revision != current.get("revision"):
+            raise HTTPException(status_code=400, detail="Agent completion revision does not match the immutable job revision")
+        if payload.result.get("model_id") not in (None, current.get("model_id")):
+            raise HTTPException(status_code=400, detail="Agent completion model does not match the job model")
+        if payload.domain_status not in {"CONFIG_ONLY", "PREPARED"}:
+            raise HTTPException(status_code=400, detail="This preparation workflow cannot report execution or validation")
+        if intent == "METADATA_ONLY":
+            metadata_result = payload.result.get("materialization") or {}
+            if (
+                payload.domain_status != "CONFIG_ONLY"
+                or payload.result.get("weights") == "MATERIALIZED"
+                or metadata_result.get("has_weights") is True
+            ):
+                raise HTTPException(status_code=400, detail="Metadata-only jobs cannot complete with materialized weights")
+        if intent == "FULL_WEIGHTS":
+            materialization = payload.result.get("materialization") or {}
+            observation = payload.result.get("agent_observation") or {}
+            if (
+                request_payload.get("weights_consent") is not True
+                or payload.domain_status != "PREPARED"
+                or materialization.get("mode") != "FULL_WEIGHTS"
+                or materialization.get("has_weights") is not True
+                or not isinstance(materialization.get("materialized_bytes"), int)
+                or materialization.get("materialized_bytes", 0) <= 0
+                or not isinstance(materialization.get("weights_size_bytes"), int)
+                or materialization.get("weights_size_bytes", 0) <= 0
+                or materialization.get("cache_status") not in {"MISS_DOWNLOADED", "HIT_VERIFIED"}
+                or materialization.get("integrity") not in {"FULL_SHA256_MANIFEST_VERIFIED", "MANIFEST_AND_SELECTED_SHA256_VERIFIED"}
+                or observation.get("physical_amd_execution") is not False
+                or payload.result.get("amd_validated") is not False
+                or payload.result.get("weights") != "MATERIALIZED"
+            ):
+                raise HTTPException(status_code=400, detail="PREPARED requires consent, verified weights, and no AMD validation")
     try:
         stored = _store_agent_artifacts(
             req.app.state.config.artifact_storage_dir,

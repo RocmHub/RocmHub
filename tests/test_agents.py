@@ -44,6 +44,7 @@ def create_prepare(client: TestClient) -> str:
         json={
             "job_type": "PREPARE_MODEL_FOR_AMD",
             "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
             "target_gpu": "Radeon RX 7900 XTX",
             "target_gfx": "gfx1100",
             "precision": "fp16",
@@ -87,6 +88,155 @@ def test_mac_agent_claims_config_only_preparation_once(tmp_path: object) -> None
         assert client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"] is None
 
 
+def test_full_materialization_contract_persists_explicit_consent(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        body = {
+            "job_type": "PREPARE_MODEL_FOR_AMD",
+            "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+            "target_gpu": "Radeon RX 7900 XTX",
+            "target_gfx": "gfx1100",
+            "precision": "fp16",
+            "runtime": "pytorch_transformers_hip",
+            "materialization_mode": "FULL_WEIGHTS",
+            "weights_consent": True,
+            "expected_capabilities": ["PREPARE_MODEL_FOR_AMD"],
+            "cache_policy": "REUSE",
+        }
+        assert client.post("/api/v1/jobs", json={**body, "weights_consent": False}).status_code == 422
+        created = client.post("/api/v1/jobs", json=body)
+        assert created.status_code == 202
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()
+        assert claim["request_payload"]["materialization_mode"] == "FULL_WEIGHTS"
+        assert claim["request_payload"]["weights_consent"] is True
+        assert claim["request_payload"]["revision"] == body["revision"]
+
+
+def test_remote_agent_cancellation_is_visible_to_claim_owner(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        assert client.get(f"/api/v1/agents/{agent_id}/jobs/{job_id}/status", headers=HEADERS).json() == {"status": "RUNNING"}
+        cancelled = client.post(f"/api/v1/jobs/{job_id}/cancel")
+        assert cancelled.json()["status"] == "CANCELLED"
+        assert client.get(f"/api/v1/agents/{agent_id}/jobs/{job_id}/status", headers=HEADERS).json() == {"status": "CANCELLED"}
+
+
+def test_server_artifact_allowlist_rejects_model_weight_upload(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        response = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={"domain_status": "CONFIG_ONLY", "revision": "7ae557604adf67be50417f59c2c2f167def9a775", "result": {"weights": "NOT_DOWNLOADED"}, "artifact_files": {"model.safetensors": "not-a-weight"}},
+        )
+        assert response.status_code == 400
+
+
+def test_control_plane_rejects_forged_prepared_for_metadata_only_job(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        response = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "PREPARED",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "result": {"weights": "MATERIALIZED", "amd_validated": False},
+            },
+        )
+        assert response.status_code == 400
+        assert client.get(f"/api/v1/jobs/{job_id}").json()["status"] == "RUNNING"
+
+
+def test_control_plane_rejects_agent_revision_drift(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job = client.post(
+            "/api/v1/jobs",
+            json={
+                "job_type": "PREPARE_MODEL_FOR_AMD",
+                "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "materialization_mode": "FULL_WEIGHTS",
+                "weights_consent": True,
+            },
+        ).json()
+        job_id = job["job_id"]
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        response = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "PREPARED",
+                "revision": "a" * 40,
+                "result": {},
+            },
+        )
+        assert response.status_code == 400
+
+
+def test_control_plane_disallows_execution_domain_status_in_milestone_2b(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        response = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "EXECUTED",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "result": {"amd_validated": True},
+            },
+        )
+        assert response.status_code == 400
+
+
+def test_control_plane_rejects_agent_local_cache_paths_in_results(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job = client.post(
+            "/api/v1/jobs",
+            json={
+                "job_type": "PREPARE_MODEL_FOR_AMD",
+                "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "materialization_mode": "FULL_WEIGHTS",
+                "weights_consent": True,
+            },
+        ).json()
+        job_id = job["job_id"]
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        response = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "PREPARED",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "result": {
+                    "materialization": {
+                        "mode": "FULL_WEIGHTS",
+                        "has_weights": True,
+                        "cache_status": "MISS_DOWNLOADED",
+                        "integrity": "FULL_SHA256_MANIFEST_VERIFIED",
+                    },
+                    "agent_observation": {"physical_amd_execution": False},
+                    "amd_validated": False,
+                    "cache_path": "/Users/agent/private/cache/model",
+                },
+            },
+        )
+        assert response.status_code == 400
+        assert "path" in response.json()["detail"].lower()
+
+
 def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
     with make_client(tmp_path) as client:
         client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
@@ -100,7 +250,7 @@ def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
                 "domain_status": "CONFIG_ONLY",
                 "result": {"weights": "NOT_DOWNLOADED", "artifacts": {"runtime_config.json": "abc"}},
                 "output_dir": "/private/agent-workspace/job",
-                "revision": "deadbeef",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
                 "artifact_files": {"runtime_config.json": "{\"device\": \"cpu\"}\n"},
             },
         )
@@ -157,6 +307,7 @@ def test_agent_artifact_sanitization_provenance_and_download_hashes(tmp_path: ob
             headers=HEADERS,
             json=with_completion_id({
                 "domain_status": "CONFIG_ONLY",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
                 "attempt": claim["attempt"],
                 "result": {
                     "artifacts": upload["artifacts"],
@@ -222,6 +373,7 @@ def test_agent_completion_replay_is_idempotent(tmp_path: object) -> None:
         claim = client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS).json()["job"]
         request = with_completion_id({
             "domain_status": "CONFIG_ONLY",
+            "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
             "attempt": claim["attempt"],
             "result": {"weights": "NOT_DOWNLOADED"},
             "artifact_files": {"runtime_config.json": "{}\n"},
@@ -245,6 +397,7 @@ def test_agent_artifact_upload_rejects_path_escape(tmp_path: object) -> None:
             headers=HEADERS,
             json={
                 "domain_status": "CONFIG_ONLY",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
                 "result": {"weights": "NOT_DOWNLOADED"},
                 "artifact_files": {"../private.txt": "nope"},
             },

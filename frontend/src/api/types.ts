@@ -144,6 +144,10 @@ export interface JobCreatePayload {
   objective?: string;
   strategies?: string[];
   allow_full_weights?: boolean;
+  materialization_mode?: 'METADATA_ONLY' | 'FULL_WEIGHTS';
+  weights_consent?: boolean;
+  expected_capabilities?: string[];
+  cache_policy?: 'REUSE';
   timeout_seconds?: number;
   max_candidates?: number;
   max_attempts?: number;

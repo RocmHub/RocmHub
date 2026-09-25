@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class JobType(str, Enum):
@@ -27,6 +28,13 @@ class JobStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class MaterializationIntent(str, Enum):
+    """Explicit, consent-gated file acquisition requested by a preparation job."""
+
+    METADATA_ONLY = "METADATA_ONLY"
+    FULL_WEIGHTS = "FULL_WEIGHTS"
+
+
 class JobCreateRequest(BaseModel):
     """Request schema for initiating a new background job."""
 
@@ -43,6 +51,13 @@ class JobCreateRequest(BaseModel):
     allow_full_weights: bool = Field(
         default=False, description="Whether to permit downloading full multi-gigabyte weight tensors"
     )
+    materialization_mode: Optional[MaterializationIntent] = Field(
+        default=None,
+        description="Explicit preparation materialization intent; defaults to configuration only.",
+    )
+    weights_consent: bool = Field(default=False, description="Explicit consent to download real model weights.")
+    expected_capabilities: Optional[List[str]] = None
+    cache_policy: Optional[Literal["REUSE"]] = None
     output_dir: Optional[str] = Field(
         default=None, max_length=512, description="Target filesystem directory for build/run outputs"
     )
@@ -60,6 +75,27 @@ class JobCreateRequest(BaseModel):
     )
     target_gfx: Optional[str] = Field(default=None, max_length=64)
     runtime: Optional[str] = Field(default="pytorch_transformers_hip", max_length=128)
+
+    @model_validator(mode="after")
+    def validate_prepare_materialization(self) -> "JobCreateRequest":
+        if self.job_type != JobType.PREPARE_MODEL_FOR_AMD:
+            return self
+        if self.materialization_mode is None:
+            object.__setattr__(self, "materialization_mode", MaterializationIntent.METADATA_ONLY)
+        if self.expected_capabilities is None:
+            object.__setattr__(self, "expected_capabilities", ["PREPARE_MODEL_FOR_AMD"])
+        if self.cache_policy is None:
+            object.__setattr__(self, "cache_policy", "REUSE")
+        if not self.revision or not re.fullmatch(r"[0-9a-fA-F]{40}", self.revision):
+            raise ValueError("PREPARE_MODEL_FOR_AMD requires an immutable 40-character commit revision")
+        if self.materialization_mode == MaterializationIntent.FULL_WEIGHTS and not self.weights_consent:
+            raise ValueError("weights_consent is required for FULL_WEIGHTS materialization")
+        if self.materialization_mode == MaterializationIntent.METADATA_ONLY:
+            if self.weights_consent or self.allow_full_weights:
+                raise ValueError("metadata-only preparation cannot include weight-download consent")
+        if self.materialization_mode == MaterializationIntent.FULL_WEIGHTS and self.allow_full_weights:
+            raise ValueError("use materialization_mode and weights_consent, not allow_full_weights")
+        return self
 
 
 class JobResponse(BaseModel):

@@ -57,6 +57,7 @@ htmlcov/
 /artifacts/
 /diagnostics/artifacts/
 /builds/
+/agent-workspace/
 /forge_builds/
 /optimizations/
 .rocmhub/

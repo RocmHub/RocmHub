@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from rocmhub.engineer.agent import AIEngineer
 from rocmhub.engineer.base import EngineerBudget, EngineerObjective, EngineerRequest
 from rocmhub.forge.executor import ForgeExecutor
+from rocmhub.forge.materializer import ModelMaterializer
 from rocmhub.forge.planner import ForgePlanner
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
@@ -29,6 +30,7 @@ def execute_job(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
+    materializer: Optional[ModelMaterializer] = None,
 ) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute a single job with cooperative cancellation and event emissions.
 
@@ -48,9 +50,17 @@ def execute_job(
 
     try:
         res: Any
-        if job_type == JobType.FORGE_BUILD:
+        if job_type in (JobType.FORGE_BUILD, JobType.PREPARE_MODEL_FOR_AMD):
+            if job_type == JobType.PREPARE_MODEL_FOR_AMD:
+                mode = request_data.get("materialization_mode", "METADATA_ONLY")
+                consent = request_data.get("weights_consent") is True
+                if mode == "FULL_WEIGHTS" and not consent:
+                    raise ValueError("Weight download requires explicit user consent")
+                if mode not in {"FULL_WEIGHTS", "METADATA_ONLY"}:
+                    raise ValueError("Unsupported materialization mode")
+                request_data = {**request_data, "allow_full_weights": mode == "FULL_WEIGHTS"}
             res = _execute_forge_build(
-                job_id, model_id, revision, target_gpu, request_data, cancellation_event, emit
+                job_id, model_id, revision, target_gpu, request_data, cancellation_event, emit, materializer
             )
         elif job_type == JobType.ENGINEER:
             res = _execute_engineer(
@@ -97,6 +107,7 @@ def _execute_forge_build(
     request_data: Dict[str, Any],
     cancellation_event: threading.Event,
     emit: EventEmitter,
+    materializer: Optional[ModelMaterializer] = None,
 ) -> Tuple[JobStatus, Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[str]]:
     """Execute FORGE_BUILD job."""
     precision = request_data.get("precision") or "fp16"
@@ -124,10 +135,16 @@ def _execute_forge_build(
         emit("CANCELLATION", "CANCELLED", "Job cancelled after planning phase", None, None)
         return (JobStatus.CANCELLED, None, str(output_dir), None, "Job cancelled by user request", "JOB_CANCELLED", None)
 
-    emit("BUILDING", "RUNNING", f"Executing build steps in {output_dir} (download_weights={allow_full_weights})", None, None)
+    preparing_agent_job = request_data.get("materialization_mode") is not None
+    build_message = (
+        "Executing Forge preparation on the connected Agent"
+        if preparing_agent_job
+        else f"Executing build steps in {output_dir} (download_weights={allow_full_weights})"
+    )
+    emit("BUILDING", "RUNNING", build_message, None, None)
 
     execute_inference = request_data.get("execute_inference", False)
-    executor = ForgeExecutor()
+    executor = ForgeExecutor(materializer=materializer)
     manifest = executor.execute(
         plan=plan,
         download_weights=allow_full_weights,
@@ -136,13 +153,33 @@ def _execute_forge_build(
     )
 
     domain_status = manifest.status.value
-    emit("FINALIZING", "SUCCESS", f"Forge build completed with domain status {domain_status}", None, {"manifest": manifest.model_dump(mode="json")})
+    materialization: Dict[str, Any] = {}
+    for step in manifest.steps:
+        if step.name == "materialize_model" and step.details:
+            details = step.details
+            materialization = {
+                "mode": details.get("mode"),
+                "has_weights": details.get("has_weights", False),
+                "cache_status": details.get("cache_status"),
+                "integrity": details.get("integrity"),
+                "materialized_bytes": details.get("materialized_bytes", 0),
+                "weights_size_bytes": details.get("weights_size_bytes", 0),
+            }
+            break
+    safe_details: Dict[str, Any] = {"domain_status": domain_status}
+    if materialization:
+        safe_details["materialization"] = materialization
+    if domain_status != "FAILED":
+        emit("FINALIZING", "SUCCESS", f"Forge preparation completed with domain status {domain_status}", None, safe_details)
+    result_payload = manifest.model_dump(mode="json")
+    result_payload["materialization"] = materialization
+    result_payload["amd_validated"] = manifest.amd_validated
 
     return (
-        JobStatus.SUCCEEDED,
+        JobStatus.FAILED if domain_status == "FAILED" else JobStatus.SUCCEEDED,
         domain_status,
         str(output_dir),
-        sanitize_payload(manifest.model_dump(mode="json")),
+        sanitize_payload(result_payload),
         None,
         None,
         manifest.revision,

@@ -80,6 +80,9 @@ class MaterializedModel(BaseModel):
     license_name: Optional[str] = Field(default=None, description="Detected license name/identifier.")
     weights_size_bytes: int = Field(default=0, ge=0, description="Total size of weights files in bytes.")
     cached: bool = Field(default=False, description="Whether weights were reused from local HF cache.")
+    cache_status: Optional[str] = None
+    integrity: Optional[str] = None
+    materialized_bytes: int = Field(default=0, ge=0)
 
 
 class ForgePlan(BaseModel):

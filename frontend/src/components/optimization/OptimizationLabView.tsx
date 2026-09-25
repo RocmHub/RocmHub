@@ -82,6 +82,9 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 }
               }
             },
+            onError: () => {
+              if (!isCancelled) toast.warning('Live updates are interrupted. The same job is being checked directly.');
+            },
             onComplete: async () => {
               try {
                 const res = await fetchJobResult(selectedJobId!);
@@ -141,6 +144,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
               .catch(() => {});
           }
         },
+        onError: () => toast.warning('Live updates are interrupted. The same experiment is being checked directly.'),
         onComplete: async () => {
           try {
             const res = await fetchJobResult(job.job_id);
@@ -162,8 +166,15 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
     if (!activeJob) return;
     try {
       await cancelJob(activeJob.job_id);
-      setActiveJob((prev) => (prev ? { ...prev, status: 'CANCELLED' } : prev));
-      setLaunchError('The experiment was cancelled. The study design is preserved for retry.');
+      const job = await fetchJob(activeJob.job_id);
+      setActiveJob(job);
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+        const result = await fetchJobResult(activeJob.job_id);
+        setJobResult(result);
+        setActiveJob((prev) => prev ? { ...prev, status: result.job_status, domain_status: result.domain_status } : prev);
+      }
+      if (job.status === 'CANCELLED') setLaunchError('The experiment was cancelled. The study design is preserved for retry.');
+      else if (job.status !== 'SUCCEEDED') toast.info('Cancellation requested. The job is still being reconciled.');
     } catch (e: any) {
       toast.error(`Cancel failed: ${e.message}`);
     }

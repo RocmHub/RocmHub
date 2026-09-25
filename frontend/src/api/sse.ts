@@ -4,7 +4,10 @@ export interface SseOptions {
   onEvent: (event: JobEvent) => void;
   onError?: (error: Error) => void;
   onComplete?: () => void;
+  /** Transport health only; an SSE failure is not a domain job failure. */
+  onDegraded?: (degraded: boolean) => void;
   maxReconnectAttempts?: number;
+  pollIntervalMs?: number;
 }
 
 export function subscribeToJobEvents(
@@ -18,6 +21,17 @@ export function subscribeToJobEvents(
   const maxAttempts = options.maxReconnectAttempts ?? 5;
   let isClosed = false;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let pollingTimeout: ReturnType<typeof setTimeout> | null = null;
+  let isDegraded = false;
+  let pollAttempt = 0;
+  let completed = false;
+
+  function finish() {
+    if (completed || isClosed) return;
+    completed = true;
+    cleanup();
+    options.onComplete?.();
+  }
 
   function connect() {
     if (isClosed) return;
@@ -41,18 +55,16 @@ export function subscribeToJobEvents(
         options.onEvent(parsed);
 
         // Check terminal state: only job-level terminal states, not step-level SUCCESS
+        // Transport/event labels are hints, not domain state. Only an explicit
+        // terminal job status may stop observation; a late phase event can race
+        // the transaction that persists the result.
         const isTerminal =
           parsed.status === 'SUCCEEDED' ||
           parsed.status === 'FAILED' ||
-          parsed.status === 'CANCELLED' ||
-          parsed.phase === 'COMPLETED' ||
-          e.type === 'job_completed' ||
-          e.type === 'job_failed' ||
-          e.type === 'job_cancelled';
+          parsed.status === 'CANCELLED';
 
         if (isTerminal) {
-          cleanup();
-          options.onComplete?.();
+          finish();
         }
       } catch (err: any) {
         console.warn('Failed to parse SSE event payload:', err, e.data);
@@ -76,6 +88,10 @@ export function subscribeToJobEvents(
 
     eventSource.onopen = () => {
       reconnectAttempts = 0;
+      if (isDegraded) {
+        isDegraded = false;
+        options.onDegraded?.(false);
+      }
     };
 
     eventSource.onerror = async () => {
@@ -89,8 +105,7 @@ export function subscribeToJobEvents(
         if (checkRes.ok) {
           const jobData = await checkRes.json();
           if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(jobData.status)) {
-            cleanup();
-            options.onComplete?.();
+            finish();
             return;
           }
         }
@@ -105,9 +120,39 @@ export function subscribeToJobEvents(
           connect();
         }, backoffMs);
       } else {
-        options.onError?.(new Error('SSE stream disconnected after maximum retry attempts'));
+        if (!isDegraded) {
+          isDegraded = true;
+          options.onDegraded?.(true);
+          options.onError?.(new Error('Live updates are interrupted; checking job status directly.'));
+        }
+        scheduleStatusCheck();
+        // Keep a low-frequency SSE recovery attempt alive alongside REST polling.
+        reconnectTimeout = setTimeout(connect, 30000);
       }
     };
+  }
+
+  function scheduleStatusCheck() {
+    if (isClosed || pollingTimeout) return;
+    const base = options.pollIntervalMs ?? 1000;
+    const delay = Math.min(base * Math.pow(1.7, pollAttempt++), 10000);
+    pollingTimeout = setTimeout(async () => {
+      pollingTimeout = null;
+      if (isClosed) return;
+      try {
+        const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+        if (response.ok) {
+          const job = await response.json();
+          if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+            finish();
+            return;
+          }
+        }
+      } catch {
+        // Keep the bounded-frequency status check alive through transient API outages.
+      }
+      scheduleStatusCheck();
+    }, delay);
   }
 
   function cleanup() {
@@ -115,6 +160,10 @@ export function subscribeToJobEvents(
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
+    }
+    if (pollingTimeout) {
+      clearTimeout(pollingTimeout);
+      pollingTimeout = null;
     }
     if (eventSource) {
       eventSource.close();

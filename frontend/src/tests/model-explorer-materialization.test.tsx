@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ToastProvider } from '../components/common/Toast';
 import { ModelExplorerView } from '../components/explorer/ModelExplorerView';
 
 const api = vi.hoisted(() => ({
   fetchModel: vi.fn(),
   createJob: vi.fn(),
+  fetchJob: vi.fn(),
   fetchJobResult: vi.fn(),
   cancelJob: vi.fn(),
   subscribeToJobEvents: vi.fn(() => () => undefined),
@@ -49,8 +50,10 @@ async function inspectModel() {
 describe('Model Explorer materialization consent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     api.fetchModel.mockResolvedValue(metadata);
     api.createJob.mockResolvedValue({ job_id: 'job_prepare_01', status: 'QUEUED' });
+    api.fetchJob.mockResolvedValue({ job_id: 'job_prepare_01', model_id: metadata.model_id, status: 'RUNNING' });
   });
 
   it('queues CONFIG_ONLY without weight consent by default', async () => {
@@ -82,5 +85,30 @@ describe('Model Explorer materialization consent', () => {
       revision: metadata.commit_sha,
       cache_policy: 'REUSE',
     });
+  });
+
+  it('retries a degraded observer for the same job instead of creating a duplicate', async () => {
+    renderView();
+    await inspectModel();
+    fireEvent.click(screen.getByRole('button', { name: /Prepare configuration only/ }));
+    await waitFor(() => expect(api.subscribeToJobEvents).toHaveBeenCalledTimes(1));
+
+    const calls = api.subscribeToJobEvents.mock.calls as unknown as [string, { onError: () => void }][];
+    const observer = calls[0][1];
+    act(() => observer.onError());
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(api.subscribeToJobEvents).toHaveBeenCalledTimes(2));
+    expect(api.createJob).toHaveBeenCalledTimes(1);
+    expect(calls[1][0]).toBe('job_prepare_01');
+  });
+
+  it('resumes the stored job after reload without creating another job', async () => {
+    sessionStorage.setItem('rocmhub.model-explorer.active-job', 'job_prepare_01');
+    renderView();
+
+    await waitFor(() => expect(api.fetchJob).toHaveBeenCalledWith('job_prepare_01'));
+    expect(api.createJob).not.toHaveBeenCalled();
+    expect(api.subscribeToJobEvents).toHaveBeenCalledTimes(1);
   });
 });

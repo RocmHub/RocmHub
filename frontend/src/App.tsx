@@ -165,6 +165,7 @@ export const App: React.FC = () => {
               <OptimizationLabView
                 selectedJobId={selectedJobId}
                 onJobCreated={handleJobCreated}
+                amdComputeAvailable={isLoadingHealth || isHealthError || !health ? null : health.rocm_available}
               />
             )}
           </main>

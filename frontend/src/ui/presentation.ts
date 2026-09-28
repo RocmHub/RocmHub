@@ -1,4 +1,4 @@
-import type { AgentInfo, DomainStatus, JobStatus, JobType } from '../api/types';
+import type { AgentInfo, DomainStatus, HealthResponse, JobStatus, JobType } from '../api/types';
 
 export const JOB_STATUS_COPY: Record<JobStatus, string> = {
   QUEUED: 'Waiting to start',
@@ -49,6 +49,15 @@ export function agentSummary(agents: AgentInfo[]): string {
   const counts = { ONLINE: 0, BUSY: 0, OFFLINE: 0, DEGRADED: 0 };
   agents.forEach((agent) => { counts[agent.status] += 1; });
   return `${counts.ONLINE} connected · ${counts.BUSY} working · ${counts.OFFLINE} not connected · ${counts.DEGRADED} interrupted`;
+}
+
+export function hasConnectedAmdCompute(health: HealthResponse | null, agents: AgentInfo[]): boolean {
+  const serviceCompute = health?.status === 'healthy' && health.rocm_available;
+  const remoteCompute = agents.some((agent) =>
+    (agent.status === 'ONLINE' || agent.status === 'BUSY') &&
+    agent.capabilities.rocm_detected && agent.capabilities.amd_gpu_count > 0
+  );
+  return Boolean(serviceCompute || remoteCompute);
 }
 
 export function tabForJobType(type: JobType): 'forge' | 'engineer' | 'optimization' | 'explorer' {

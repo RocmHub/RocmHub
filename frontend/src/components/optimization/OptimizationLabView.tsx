@@ -17,6 +17,7 @@ import optimizationLabHeroImg from '../../assets/visuals/optimization_lab_hero.s
 interface OptimizationLabViewProps {
   selectedJobId?: string | null;
   onJobCreated?: (jobId: string) => void;
+  amdComputeAvailable: boolean | null;
 }
 
 const OBJECTIVES = [
@@ -35,7 +36,7 @@ const friendlyError = (message: string) => message.includes('MODEL_NOT_FOUND')
   ? 'The model could not be resolved. Check repository access and the model ID, then retry.'
   : message;
 
-export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ selectedJobId, onJobCreated }) => {
+export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ selectedJobId, onJobCreated, amdComputeAvailable }) => {
   const toast = useToast();
 
   const [modelId, setModelId] = useState('Qwen/Qwen2.5-0.5B-Instruct');
@@ -47,6 +48,16 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   const [jobResult, setJobResult] = useState<JobResultResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+
+  // This screen currently has no weight-download consent/materialization step.
+  // Keep its jobs preparation-only even when AMD compute is detected.
+  const allowFullWeights = false;
+  const canMeasureOnAmd = amdComputeAvailable === true && allowFullWeights;
+  const capabilityMessage = amdComputeAvailable === false
+    ? 'No AMD compute is available to this service. You can prepare a comparison study, but it will not run inference or collect hardware performance measurements. Metrics will be marked Not measured.'
+    : amdComputeAvailable === true
+      ? 'AMD compute is detected, but this study does not download model weights or start inference. It prepares comparison configurations only; no hardware performance measurements are collected.'
+      : 'AMD compute availability could not be confirmed. This action prepares comparison configurations only and does not start inference; metrics will be marked Not measured.';
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -124,7 +135,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
         model_id: modelId,
         objective,
         strategies,
-        allow_full_weights: false,
+        allow_full_weights: allowFullWeights,
       });
 
       setActiveJob(job);
@@ -205,6 +216,10 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
       <div className="page-shell py-10 space-y-6">
         {/* ── WORKSPACE SETUP ─────────────────────────────────────── */}
         <div className="focus-panel p-6 md:p-8 space-y-7">
+          <div role="note" aria-label="Hardware measurement availability" className="rounded-xl border border-amber-500/20 bg-amber-500/[.05] p-4 md:p-5">
+            <div className="text-sm font-semibold text-amber-200">Comparison preparation only</div>
+            <p className="text-sm text-zinc-400 mt-1 leading-relaxed">{capabilityMessage}</p>
+          </div>
           <div><div className="eyebrow mb-3">Study design</div><h2 className="text-2xl font-semibold tracking-[-.03em]">Baseline versus candidates</h2></div>
 
           {/* Model + Objective row */}
@@ -284,7 +299,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
               {isStarting ? (
                 <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Submitting...</>
               ) : (
-                <><Play className="w-4 h-4 fill-current" />Run Optimization</>
+                <><Play className="w-4 h-4 fill-current" />{canMeasureOnAmd ? 'Run comparison on AMD' : 'Prepare comparison'}</>
               )}
             </button>
           </div>

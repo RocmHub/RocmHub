@@ -25,7 +25,7 @@ export const RunsView: React.FC<Props> = ({ jobsList, isLoading, isError = false
     <header className="max-w-3xl">
       <div className="eyebrow mb-3">Workspace</div>
       <h1 className="page-title">Runs</h1>
-      <p className="lede mt-4">Follow preparation, builds, recommendations, and optimization studies from one place.</p>
+      <p className="lede mt-4">Track model preparation, optimization studies, and future AMD runs in one place.</p>
     </header>
 
     {selectedJobId && <section className="focus-panel mt-8 p-5 md:p-7" aria-live="polite">
@@ -50,10 +50,10 @@ export const RunsView: React.FC<Props> = ({ jobsList, isLoading, isError = false
     </section>}
 
     <section className="mt-9" aria-label="Recent runs">
-      <div className="flex items-end justify-between gap-4 mb-4"><div><h2 className="text-lg font-semibold">Recent runs</h2><p className="text-sm text-zinc-500 mt-1">The latest operations in this workspace.</p></div>{jobsList && <span className="text-xs text-zinc-600">{jobsList.total} total</span>}</div>
+      <div className="flex items-end justify-between gap-4 mb-4"><div><h2 className="text-lg font-semibold">Recent runs</h2><p className="text-sm text-zinc-500 mt-1">The latest operations in this workspace.</p></div>{jobsList && jobsList.total > 0 && <span className="text-xs text-zinc-600">{jobsList.total} total</span>}</div>
       {isLoading ? <div aria-label="Loading runs" className="space-y-3">{[0,1,2].map((item) => <div key={item} className="h-24 rounded-2xl shimmer" />)}</div>
         : isError ? <div className="focus-panel p-6"><h3 className="font-semibold">Runs couldn’t be loaded</h3><p className="text-sm text-zinc-500 mt-1">Your work is unchanged. Try loading the list again.</p><button className="btn-secondary mt-4" onClick={onRetry}><RotateCcw size={14}/>Retry</button></div>
-        : jobs.length === 0 ? <div className="focus-panel p-7 md:p-9"><h3 className="text-lg font-semibold">No runs yet</h3><p className="text-sm text-zinc-500 mt-2">Start by finding a model. Your preparation and results will appear here.</p><button className="btn-primary mt-5" onClick={() => onOpenJob('', 'explorer')}>Find a model <ArrowRight size={15}/></button></div>
+        : jobs.length === 0 ? <div className="focus-panel p-7 md:p-9"><h3 className="text-lg font-semibold">No runs yet</h3><p className="text-sm text-zinc-500 mt-2">Your model preparation, optimization studies, and future AMD runs will appear here.</p><button className="btn-ghost mt-4" onClick={() => onOpenJob('', 'explorer')}>Browse models <ArrowRight size={14}/></button></div>
         : <div className="space-y-2">{jobs.map((job) => <article key={job.job_id} className="card-interactive p-4 md:p-5">
           <button onClick={() => onOpenJob(job.job_id, tabForJobType(job.job_type))} className="w-full text-left flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="text-xs text-zinc-400">{JOB_TYPE_COPY[job.job_type]}</span><span className="text-xs text-zinc-500">{JOB_STATUS_COPY[job.status]}</span></div><div className="font-medium mt-2 truncate">{job.model_id}</div></div>

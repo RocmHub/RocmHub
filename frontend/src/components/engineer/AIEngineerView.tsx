@@ -6,9 +6,9 @@ import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
-import { domainStatusLabel, jobProgressCopy } from '../../ui/presentation';
+import { DOMAIN_STATUS_COPY, domainStatusLabel, jobProgressCopy } from '../../ui/presentation';
 import {
-  Play, XCircle, CheckCircle2, Clock, RotateCcw,
+  Play, XCircle, CheckCircle2, RotateCcw,
   AlertCircle, ChevronDown, ChevronUp,
   Shield, Zap, Timer, Layers,
 } from 'lucide-react';
@@ -256,7 +256,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         <div className="focus-panel p-6 md:p-8 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-content-muted">Model ID</label>
+              <label className="text-sm font-medium text-content-muted">Public Hugging Face model ID</label>
               <input
                 type="text"
                 value={modelId}
@@ -274,7 +274,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                 {isStarting ? (
                   <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Launching...</>
                 ) : (
-                  <><Play className="w-4 h-4 fill-current" />Start Session</>
+                  <><Play className="w-4 h-4 fill-current" />Get recommendation</>
                 )}
               </button>
             </div>
@@ -334,8 +334,8 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
           <div className="flex flex-col gap-4">
             {isRunning && !jobResult && (
               <div className="focus-panel p-6 md:p-8 order-1" aria-label="Engineer activity">
-                <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Engineer activity</div><h3 className="text-xl font-semibold">Building a recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
-                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{latestActivity ? `${jobProgressCopy(latestActivity.status, latestActivity.phase)} your guided session.` : 'Waiting for the first progress update'}</span></div><p className="text-sm text-zinc-600 mt-2">Progress updates · no completion percentage is estimated</p></div>
+                <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Progress</div><h3 className="text-xl font-semibold">Preparing your recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
+                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{activeJob.status === 'QUEUED' ? 'Waiting for compatible compute. Your request is saved.' : latestActivity ? `${jobProgressCopy(latestActivity.status, latestActivity.phase)} your request.` : 'Your request is in progress. Checking for the first update.'}</span></div><p className="text-sm text-zinc-600 mt-2">Live updates may pause temporarily; the same request is reconciled. No completion percentage is estimated.</p></div>
               </div>
             )}
             {/* Session header */}
@@ -371,7 +371,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                       }`} />
                       <div className="flex-1 min-w-0">
                         <span className="text-[11px] font-medium text-content-secondary">
-                          {PHASE_LABELS[evt.phase] || evt.phase}
+                          {PHASE_LABELS[evt.phase] || 'Working on your request'}
                         </span>
                         <span className="text-content-muted mx-1.5">—</span>
                         <span className="text-content-secondary">{jobProgressCopy(evt.status, evt.phase)}</span>
@@ -411,7 +411,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-surface-border">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="text-sm font-semibold text-emerald-400">
+                    <span className="text-sm font-semibold text-content-primary">
                       Recommendation ready
                     </span>
                   </div>
@@ -420,46 +420,17 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   </span>
                 </div>
 
-                {/* Metrics row */}
-                {jobResult.result && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
-                      <div className="flex items-center gap-1.5 text-[11px] text-content-muted mb-1">
-                        <Clock className="w-3 h-3" /> Duration
-                      </div>
-                      <div className="text-sm font-bold text-content-primary font-mono">
-                        {jobResult.result.total_duration_seconds !== undefined
-                          ? `${Number(jobResult.result.total_duration_seconds).toFixed(1)}s`
-                          : '—'}
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
-                      <div className="flex items-center gap-1.5 text-[11px] text-content-muted mb-1">
-                        <RotateCcw className="w-3 h-3" /> Attempts
-                      </div>
-                      <div className="text-sm font-bold text-content-primary font-mono">
-                        {jobResult.result.attempts_used ?? '—'}
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
-                      <div className="text-[11px] text-content-muted mb-1">Goal</div>
-                      <div className="text-xs font-bold text-content-primary">
-                        {(selectedObj?.label || objective).replace('Base Preparation', 'Prepare this model').replace('Max Throughput', 'Optimize throughput').replace('Min Latency', 'Reduce latency').replace('Full Preparation', 'Analyze compatibility')}
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
-                      <div className="text-[11px] text-content-muted mb-1">Preparation</div>
-                      <div className="text-xs font-bold text-emerald-400">
-                        {domainStatusLabel(jobResult.result.build_manifest?.status || jobResult.domain_status) || 'Recommendation ready'}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <div className="p-4 border-l-2 border-red-500/50 bg-surface-elevated">
+                  <div className="text-sm font-semibold text-content-primary">{selectedObj?.label || 'Guidance'}</div>
+                  <p className="text-sm text-content-secondary mt-1">Review the guidance below. A recommendation does not itself run, validate, or measure the model.</p>
+                  {jobResult.domain_status && <div className="text-sm text-content-secondary mt-3">{domainStatusLabel(jobResult.domain_status)} · {DOMAIN_STATUS_COPY[jobResult.domain_status].explanation}</div>}
+                </div>
+                {jobResult.result && <details className="technical-details"><summary>Technical session details</summary><dl className="mt-3 grid sm:grid-cols-3 gap-3"><div><dt>Session duration</dt><dd>{jobResult.result.total_duration_seconds !== undefined ? `${Number(jobResult.result.total_duration_seconds).toFixed(1)}s` : 'Not reported'}</dd></div><div><dt>Attempts</dt><dd>{jobResult.result.attempts_used ?? 'Not reported'}</dd></div><div><dt>Recorded status</dt><dd>{domainStatusLabel(jobResult.result.build_manifest?.status || jobResult.domain_status) || 'Not reported'}</dd></div></dl></details>}
 
                 {/* Recommendations */}
                 {jobResult.result?.reasons && Array.isArray(jobResult.result.reasons) && jobResult.result.reasons.length > 0 && (
                   <div className="p-4 rounded-xl bg-surface-elevated border border-surface-border space-y-2">
-                    <div className="text-xs font-semibold text-content-secondary uppercase tracking-wide">Recommendations</div>
+                    <div className="text-sm font-semibold text-content-secondary">Recommended next steps</div>
                     <ul className="space-y-2">
                       {jobResult.result.reasons.map((reason: string, idx: number) => (
                         <li key={idx} className="flex items-start gap-2 text-xs text-content-secondary">
@@ -476,7 +447,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/20 space-y-2">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
                       <AlertCircle className="w-3.5 h-3.5" />
-                      Handled During Session
+                      Details to review
                     </div>
                     <ul className="space-y-1 text-xs text-amber-300/80">
                       {jobResult.result.errors_encountered.map((err: string, idx: number) => (

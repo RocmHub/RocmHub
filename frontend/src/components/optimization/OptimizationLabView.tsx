@@ -347,8 +347,10 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                   <div className="flex items-center gap-2">
                     {jobResult.job_status === 'FAILED'
                       ? <Info className="w-4 h-4 text-amber-400" />
-                      : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                    <span className={`text-sm font-semibold ${jobResult.job_status === 'FAILED' ? 'text-amber-300' : 'text-emerald-400'}`}>
+                      : hasMeasuredCandidate
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        : <Info className="w-4 h-4 text-content-muted" />}
+                    <span className={`text-sm font-semibold ${jobResult.job_status === 'FAILED' ? 'text-amber-300' : hasMeasuredCandidate ? 'text-emerald-400' : 'text-content-primary'}`}>
                       {jobResult.job_status === 'FAILED'
                         ? 'The comparison could not complete'
                         : hasMeasuredCandidate

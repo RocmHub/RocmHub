@@ -43,7 +43,7 @@ function renderView() {
 }
 
 async function inspectModel() {
-  fireEvent.submit(screen.getByLabelText('Model ID').closest('form')!);
+  fireEvent.submit(screen.getByLabelText('Public Hugging Face model ID').closest('form')!);
   await screen.findByText('Qwen/Qwen2.5-0.5B-Instruct');
 }
 
@@ -59,7 +59,7 @@ describe('Model Explorer materialization consent', () => {
   it('queues CONFIG_ONLY without weight consent by default', async () => {
     renderView();
     await inspectModel();
-    fireEvent.click(screen.getByRole('button', { name: /Prepare setup/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Prepare configuration only/ }));
     await waitFor(() => expect(api.createJob).toHaveBeenCalledTimes(1));
     expect(api.createJob.mock.calls[0][0]).toMatchObject({
       materialization_mode: 'METADATA_ONLY',
@@ -75,7 +75,7 @@ describe('Model Explorer materialization consent', () => {
     expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Files' }));
     expect(screen.getByText('Repository contents')).toBeInTheDocument();
-    expect(screen.getByText(/Inspection does not download or materialize model weights/)).toBeInTheDocument();
+    expect(screen.getByText(/does not download model weights/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Compatibility' }));
     expect(screen.getByText('Not tested on AMD hardware yet.')).toBeInTheDocument();
   });
@@ -102,7 +102,7 @@ describe('Model Explorer materialization consent', () => {
   it('retries a degraded observer for the same job instead of creating a duplicate', async () => {
     renderView();
     await inspectModel();
-    fireEvent.click(screen.getByRole('button', { name: /Prepare setup/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Prepare configuration only/ }));
     await waitFor(() => expect(api.subscribeToJobEvents).toHaveBeenCalledTimes(1));
 
     const calls = api.subscribeToJobEvents.mock.calls as unknown as [string, { onError: () => void }][];

@@ -1,9 +1,9 @@
-import type { AgentInfo, DomainStatus, HealthResponse, JobStatus, JobType } from '../api/types';
+import type { AgentInfo, DomainStatus, HealthResponse, JobResponse, JobStatus, JobType } from '../api/types';
 
 export const JOB_STATUS_COPY: Record<JobStatus, string> = {
   QUEUED: 'Waiting',
   RUNNING: 'Running',
-  SUCCEEDED: 'Ready',
+  SUCCEEDED: 'Completed',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
 };
@@ -26,7 +26,7 @@ export const DOMAIN_STATUS_COPY: Record<DomainStatus, { label: string; explanati
   },
   PREPARED: {
     label: 'Model prepared',
-    explanation: 'Model files were downloaded and verified. AMD execution was not performed.',
+    explanation: 'Model files are available and verified on connected compute. AMD execution was not performed.',
   },
   EXECUTED: {
     label: 'Ran on AMD',
@@ -90,4 +90,39 @@ export function domainStatusLabel(status: DomainStatus | string | null | undefin
 export function resultLabel(value: string | null | undefined): string | null {
   if (!value) return null;
   return domainStatusLabel(value) ?? value.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
+export function activityOutcomeCopy(
+  job: Pick<JobResponse, 'status' | 'domain_status' | 'error_message' | 'job_type'>,
+): { title: string; description: string } {
+  if (job.domain_status && job.domain_status in DOMAIN_STATUS_COPY) {
+    const outcome = DOMAIN_STATUS_COPY[job.domain_status];
+    return { title: outcome.label, description: outcome.explanation };
+  }
+  if (job.status === 'QUEUED') {
+    return { title: 'Waiting for compute', description: 'This work will start when compatible compute is available.' };
+  }
+  if (job.status === 'RUNNING') {
+    return { title: job.job_type === 'PREPARE_MODEL_FOR_AMD' ? 'Preparing model' : 'In progress', description: 'Work is underway. No completion time is estimated.' };
+  }
+  if (job.status === 'FAILED') {
+    return { title: 'Needs attention', description: job.error_message || 'This work did not complete. Open the result for details or retry.' };
+  }
+  if (job.status === 'CANCELLED') {
+    return { title: 'Cancelled', description: 'This work stopped before completion. Its result can be reviewed in Activity.' };
+  }
+  if (job.job_type === 'OPTIMIZATION') {
+    return { title: 'Comparison prepared', description: 'Performance measurements have not been collected.' };
+  }
+  return { title: 'Completed', description: 'The work finished. Open the result to see what was produced.' };
+}
+
+export function materializationCopy(cacheStatus?: string | null): { title: string; description: string } {
+  if (cacheStatus === 'HIT_VERIFIED') {
+    return { title: 'Model files already available', description: 'Verified from the connected compute cache. No repeat download was needed.' };
+  }
+  if (cacheStatus === 'MISS_DOWNLOADED') {
+    return { title: 'Model files downloaded and verified', description: 'Stored on connected compute. AMD execution was not performed.' };
+  }
+  return { title: 'Verified model files are ready', description: 'Available on connected compute. AMD execution was not performed.' };
 }

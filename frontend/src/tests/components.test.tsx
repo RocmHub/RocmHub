@@ -128,6 +128,15 @@ describe('Common Components', () => {
     expect(screen.getByRole('button', { name: 'Inspect a model to get started' })).toBeInTheDocument();
   });
 
+  it('uses a quick model action to inspect directly without duplicate Models CTAs', () => {
+    const onSearchModel = vi.fn();
+    render(<DashboardView health={null} jobsList={{ items: [], total: 0, limit: 20, offset: 0 }} isLoadingJobs={false} onNavigate={vi.fn()} onSelectJob={vi.fn()} onSearchModel={onSearchModel} />);
+    expect(screen.queryByRole('button', { name: 'Go to Models' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start with Models' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Qwen/Qwen2.5-1.5B-Instruct' }));
+    expect(onSearchModel).toHaveBeenCalledWith('Qwen/Qwen2.5-1.5B-Instruct');
+  });
+
   it('shows compute state truthfully and keeps runtime facts in technical details', () => {
     const health: HealthResponse = {
       status: 'healthy', version: '0.1.0', rocm_available: false,
@@ -198,6 +207,20 @@ describe('Common Components', () => {
     fireEvent.click(screen.getByRole('button', { name: /Tools/ }));
     expect(screen.getByRole('menuitem', { name: /AI Engineer/ })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Forge Studio/ })).toBeInTheDocument();
+  });
+
+  it('supports keyboard navigation and Escape in the Tools menu', () => {
+    render(<Sidebar activeTab="dashboard" onTabChange={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: /Tools/ });
+    fireEvent.click(trigger);
+    const engineer = screen.getByRole('menuitem', { name: /AI Engineer/ });
+    const forge = screen.getByRole('menuitem', { name: /Forge Studio/ });
+    expect(engineer).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(forge).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it('routes job deep links to Runs and preserves legacy workflow routes', () => {

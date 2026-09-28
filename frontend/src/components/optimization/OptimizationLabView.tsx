@@ -237,11 +237,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                       onClick={() => setObjective(obj.id)}
                       title={obj.desc}
                       aria-pressed={isSelected}
-                      className={`py-2 px-2 rounded-lg border text-[11px] font-medium transition-all ${
-                        isSelected
-                          ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
-                          : 'bg-surface-elevated border-surface-border text-content-secondary hover:border-zinc-600'
-                      }`}
+                      className={`option-selector goal-selector ${isSelected ? 'is-selected' : ''}`}
                     >
                       {obj.label}
                     </button>
@@ -265,11 +261,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                     onClick={() => toggleStrategy(st.id)}
                     title={st.desc}
                     aria-pressed={isSelected}
-                    className={`min-h-[130px] flex flex-col items-start justify-between gap-4 p-5 rounded-2xl border text-sm font-medium transition-all ${
-                      isSelected
-                        ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
-                        : 'bg-surface-elevated border-surface-border text-content-secondary hover:border-zinc-600 hover:text-content-primary'
-                    }`}
+                    className={`option-selector precision-selector min-h-[130px] flex flex-col items-start justify-between gap-4 p-5 text-sm font-medium ${isSelected ? 'is-selected' : ''}`}
                   >
                     {isSelected && <Check className="w-3 h-3 text-red-300" />}
                     {st.label}
@@ -281,7 +273,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
           </div>
 
           {/* Launch */}
-          <div className="flex items-center justify-between pt-2 border-t border-surface-border">
+          <div className="optimize-launch-row flex items-center justify-between pt-2 border-t border-surface-border">
             <div className="text-sm text-content-muted">
               {strategies.length} strategies · {OBJECTIVES.find(o => o.id === objective)?.label}
             </div>

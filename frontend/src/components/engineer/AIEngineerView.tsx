@@ -229,11 +229,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   disabled={(obj.id === 'MAX_THROUGHPUT' || obj.id === 'MIN_LATENCY') && amdComputeAvailable !== true}
                   aria-pressed={isSelected}
                   onClick={() => setObjective(obj.id)}
-                  className={`p-6 min-h-[190px] rounded-2xl border text-left transition-all ${
-                    isSelected
-                      ? 'bg-red-500/[.08] border-red-500/40 shadow-sm'
-                      : 'card hover:border-zinc-600 hover:bg-surface-elevated'
-                  }`}
+                  className={`option-selector objective-selector p-6 min-h-[190px] text-left ${isSelected ? 'is-selected' : ''}`}
                 >
                   <div className={`mb-8 ${isSelected ? 'text-red-400' : 'text-content-muted'}`}>
                     <Icon className="w-5 h-5" />
@@ -244,7 +240,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   <p className="text-sm text-content-muted leading-relaxed">{obj.desc}</p>
                   {(obj.id === 'MAX_THROUGHPUT' || obj.id === 'MIN_LATENCY') && amdComputeAvailable !== true && <span id={`objective-availability-${obj.id}`} className="availability-note">{amdComputeAvailable === false ? 'Requires AMD compute' : 'Compute availability unknown'}</span>}
                   {isSelected && (
-                    <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-red-500/50 to-transparent rounded" />
+                    <div className="mt-2 w-full selection-indicator" />
                   )}
                 </button>
               );

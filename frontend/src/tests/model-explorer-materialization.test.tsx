@@ -99,6 +99,23 @@ describe('Model Explorer materialization consent', () => {
     });
   });
 
+  it('moves focus into the consent dialog, traps Tab, and closes on Escape', async () => {
+    renderView();
+    await inspectModel();
+    const trigger = screen.getByRole('button', { name: /Download & Prepare/ });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const checkbox = await screen.findByRole('checkbox');
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(checkbox).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(api.createJob).not.toHaveBeenCalled();
+  });
+
   it('retries a degraded observer for the same job instead of creating a duplicate', async () => {
     renderView();
     await inspectModel();

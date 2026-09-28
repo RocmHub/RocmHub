@@ -4,7 +4,7 @@ import { createJob, fetchJob, fetchJobResult, cancelJob } from '../../api/client
 import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
-import { DOMAIN_STATUS_COPY } from '../../ui/presentation';
+import { DOMAIN_STATUS_COPY, jobProgressCopy } from '../../ui/presentation';
 import { resultLabel } from '../../ui/presentation';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
@@ -198,19 +198,20 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   const failureDetail = jobResult?.error_message || launchError || 'The experiment stopped before baseline and candidate preparation completed.';
   const baselineMeasured = Boolean(jobResult?.result?.baseline?.measured && (jobResult.result.baseline.benchmark_result?.throughput_tokens_per_sec != null || jobResult.result.baseline.benchmark_result?.ttft_ms != null));
   const hasMeasuredCandidate = Boolean(baselineMeasured && Array.isArray(jobResult?.result?.candidates) && jobResult.result.candidates.some((candidate: any) => candidate.measured && (candidate.benchmark_result?.throughput_tokens_per_sec != null || candidate.benchmark_result?.ttft_ms != null)));
-  const activityTitle = activeJob?.status === 'QUEUED' ? 'Waiting for a worker' : 'Study in progress';
+  const latestProgress = jobEvents.at(-1);
+  const activityTitle = activeJob?.status === 'QUEUED' ? 'Waiting for compute' : `${jobProgressCopy(latestProgress?.status || activeJob?.status || 'RUNNING', latestProgress?.phase)} your comparison`;
 
   return (
     <div className="page-fade optimize-page">
       <div className="page-shell py-8 md:py-10 space-y-6">
-        <header className="optimize-heading"><div><div className="eyebrow">Compare configurations</div><h1>Optimize</h1><p>Choose a model ID, a goal, and candidate configurations.</p></div><span className="optimize-state">Preparation only · no measurements yet</span></header>
+        <header className="optimize-heading"><div><div className="eyebrow">Compare configurations</div><h1>Optimize</h1><p>Choose a model, an optimization goal and candidate precisions.</p></div><span className="optimize-state">Preparation only · no measurements yet</span></header>
         {/* ── WORKSPACE SETUP ─────────────────────────────────────── */}
           <div className="focus-panel p-5 md:p-8 space-y-7">
           <div role="note" aria-label="Hardware measurement availability" className="rounded-xl border border-amber-500/20 bg-amber-500/[.05] p-4 md:p-5">
             <div className="text-sm font-semibold text-amber-200">Comparison preparation only</div>
             <p className="text-sm text-zinc-400 mt-1 leading-relaxed">{capabilityMessage}</p>
           </div>
-          <div><div className="eyebrow mb-2">Comparison setup</div><h2 className="text-2xl font-semibold tracking-[-.04em]">Build a candidate set</h2><p className="text-sm text-zinc-500 mt-2">Baseline and candidate configurations will be prepared. Results are not measured.</p></div>
+          <div><div className="eyebrow mb-2">Compare model configurations</div><h2 className="text-2xl font-semibold tracking-[-.04em]">Set up your comparison</h2><p className="text-sm text-zinc-500 mt-2">ROCmHub will prepare the comparison first. Performance measurements require AMD compute.</p></div>
 
           {/* Model + Objective row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -225,7 +226,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-content-muted">Comparison goal</label>
+              <label className="text-sm font-medium text-content-muted">Comparison goal</label>
               <div className="grid grid-cols-3 gap-2">
                 {OBJECTIVES.map((obj) => {
                   const isSelected = objective === obj.id;
@@ -235,6 +236,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                       type="button"
                       onClick={() => setObjective(obj.id)}
                       title={obj.desc}
+                      aria-pressed={isSelected}
                       className={`py-2 px-2 rounded-lg border text-[11px] font-medium transition-all ${
                         isSelected
                           ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
@@ -251,7 +253,8 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
           {/* Strategies */}
           <div className="space-y-2 pt-2 border-t border-surface-border">
-            <label className="text-xs font-medium text-content-muted">Candidate precisions</label>
+            <label className="text-sm font-medium text-content-muted">Candidate precisions</label>
+            <p className="text-sm text-content-muted">Precision affects memory use, compatibility and performance.</p>
             <div className="grid sm:grid-cols-3 gap-3">
               {STRATEGIES.map((st) => {
                 const isSelected = strategies.includes(st.id);
@@ -261,6 +264,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                     type="button"
                     onClick={() => toggleStrategy(st.id)}
                     title={st.desc}
+                    aria-pressed={isSelected}
                     className={`min-h-[130px] flex flex-col items-start justify-between gap-4 p-5 rounded-2xl border text-sm font-medium transition-all ${
                       isSelected
                         ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
@@ -278,7 +282,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
           {/* Launch */}
           <div className="flex items-center justify-between pt-2 border-t border-surface-border">
-            <div className="text-[11px] text-content-muted">
+            <div className="text-sm text-content-muted">
               {strategies.length} strategies · {OBJECTIVES.find(o => o.id === objective)?.label}
             </div>
             <button
@@ -321,7 +325,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
             <details><summary className="text-[11px] text-content-muted cursor-pointer">Technical details</summary><p className="mt-2 font-mono text-[10px] text-content-muted break-all">Run ID: {activeJob.job_id}</p></details>
 
             {isRunning && (
-              <div className="run-activity" aria-label="Experiment activity" role="status"><span className="status-dot status-dot-pending"/><div><div className="text-sm font-medium">{activityTitle}</div><p className="text-xs text-zinc-500 mt-1">{jobEvents.length ? 'Latest update from the worker:' : activeJob.status === 'QUEUED' ? 'Queued. Waiting for a worker to claim this study.' : 'Worker accepted the study. Waiting for the first status update.'}</p>{jobEvents.length > 0 && <p className="text-sm text-zinc-300 mt-2">{jobEvents[jobEvents.length - 1].message}</p>}</div></div>
+              <div className="run-activity" aria-label="Comparison preparation activity" role="status"><span className="status-dot status-dot-pending"/><div><div className="text-sm font-medium">{activityTitle}</div><p className="text-sm text-zinc-500 mt-1">{activeJob.status === 'QUEUED' ? 'This comparison will start when compatible ROCmHub compute is available.' : 'Preparing configuration candidates. No completion percentage is estimated.'}</p><details className="technical-details"><summary>Technical progress details</summary>{jobEvents.slice(-3).map(event=><p key={event.event_id}>{event.phase} · {event.message}</p>)}</details></div></div>
             )}
 
             {/* Collapsed log */}

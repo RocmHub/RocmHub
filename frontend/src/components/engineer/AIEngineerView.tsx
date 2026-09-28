@@ -6,7 +6,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
-import { domainStatusLabel } from '../../ui/presentation';
+import { domainStatusLabel, jobProgressCopy } from '../../ui/presentation';
 import {
   Play, XCircle, CheckCircle2, Clock, RotateCcw,
   AlertCircle, ChevronDown, ChevronUp,
@@ -17,31 +17,32 @@ import {
 interface AIEngineerViewProps {
   selectedJobId?: string | null;
   onJobCreated?: (jobId: string) => void;
+  amdComputeAvailable?: boolean | null;
 }
 
 const OBJECTIVES = [
   {
     id: 'BASE_PREPARATION',
-    label: 'Base Preparation',
-    desc: 'Verify runtime compatibility and validate model configuration',
+    label: 'Prepare this model',
+    desc: 'Create a model setup for AMD hardware. No inference is run.',
     Icon: Shield,
   },
   {
     id: 'MAX_THROUGHPUT',
-    label: 'Max Throughput',
-    desc: 'Optimize for highest generation tokens per second',
+    label: 'Improve throughput',
+    desc: 'Explore configurations aimed at generating more tokens per second.',
     Icon: Zap,
   },
   {
     id: 'MIN_LATENCY',
-    label: 'Min Latency',
-    desc: 'Minimize time-to-first-token for responsive inference',
+    label: 'Reduce latency',
+    desc: 'Explore configurations aimed at faster responses.',
     Icon: Timer,
   },
   {
     id: 'FULL_PREPARATION',
-    label: 'Full Preparation',
-    desc: 'Complete weight materialization when hardware is confirmed',
+    label: 'Check compatibility',
+    desc: 'Understand model requirements. AMD hardware validation is not performed.',
     Icon: Layers,
   },
 ];
@@ -58,7 +59,7 @@ const PHASE_LABELS: Record<string, string> = {
   ERROR: 'Handling error',
 };
 
-export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, onJobCreated }) => {
+export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, onJobCreated, amdComputeAvailable = null }) => {
   const toast = useToast();
 
   const [modelId, setModelId] = useState('Qwen/Qwen2.5-0.5B-Instruct');
@@ -225,6 +226,8 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                 <button
                   key={obj.id}
                   type="button"
+                  disabled={(obj.id === 'MAX_THROUGHPUT' || obj.id === 'MIN_LATENCY') && amdComputeAvailable !== true}
+                  aria-pressed={isSelected}
                   onClick={() => setObjective(obj.id)}
                   className={`p-6 min-h-[190px] rounded-2xl border text-left transition-all ${
                     isSelected
@@ -236,9 +239,10 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-content-primary' : 'text-content-secondary'}`}>
-                    {obj.label.replace('Base Preparation','Prepare this model').replace('Max Throughput','Optimize throughput').replace('Min Latency','Reduce latency').replace('Full Preparation','Analyze compatibility')}
-                  </div>
-                  <p className="text-[11px] text-content-muted leading-relaxed">{obj.desc}</p>
+                  {obj.label}
+                </div>
+                  <p className="text-sm text-content-muted leading-relaxed">{obj.desc}</p>
+                  {(obj.id === 'MAX_THROUGHPUT' || obj.id === 'MIN_LATENCY') && amdComputeAvailable !== true && <span id={`objective-availability-${obj.id}`} className="availability-note">{amdComputeAvailable === false ? 'Requires AMD compute' : 'Compute availability unknown'}</span>}
                   {isSelected && (
                     <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-red-500/50 to-transparent rounded" />
                   )}
@@ -331,7 +335,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             {isRunning && !jobResult && (
               <div className="focus-panel p-6 md:p-8 order-1" aria-label="Engineer activity">
                 <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Engineer activity</div><h3 className="text-xl font-semibold">Building a recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
-                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{latestActivity?.message || 'Waiting for the first activity update'}</span></div><p className="text-xs text-zinc-600 mt-2">Live activity · no completion percentage is estimated</p></div>
+                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{latestActivity ? `${jobProgressCopy(latestActivity.status, latestActivity.phase)} your guided session.` : 'Waiting for the first progress update'}</span></div><p className="text-sm text-zinc-600 mt-2">Progress updates · no completion percentage is estimated</p></div>
               </div>
             )}
             {/* Session header */}
@@ -351,10 +355,10 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               </div>
               <details className="mb-3"><summary className="text-[11px] text-content-muted cursor-pointer">Technical details</summary><p className="mt-2 font-mono text-[10px] text-content-muted break-all">Run ID: {activeJob.job_id}</p></details>
 
-              {/* Agent activity — product-level view of events */}
+              {/* Worker event feed, expressed as product-level progress */}
               {jobEvents.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-xs text-content-muted font-medium mb-2">Agent Activity</div>
+                  <div className="text-sm text-content-muted font-medium mb-2">Recent updates</div>
                   {jobEvents.slice(-6).map((evt) => (
                     <div
                       key={evt.event_id || evt.sequence}
@@ -370,7 +374,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                           {PHASE_LABELS[evt.phase] || evt.phase}
                         </span>
                         <span className="text-content-muted mx-1.5">—</span>
-                        <span className="text-content-secondary">{evt.message}</span>
+                        <span className="text-content-secondary">{jobProgressCopy(evt.status, evt.phase)}</span>
                       </div>
                       <span className="text-[10px] text-content-muted font-mono shrink-0">
                         {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : ''}

@@ -9,9 +9,11 @@ import { RunsView } from '../components/runs/RunsView';
 import { Navbar } from '../components/layout/Navbar';
 import { ModelExplorerView } from '../components/explorer/ModelExplorerView';
 import { OptimizationLabView } from '../components/optimization/OptimizationLabView';
+import { AIEngineerView } from '../components/engineer/AIEngineerView';
+import { ForgeStudioView } from '../components/forge/ForgeStudioView';
 import { ToastProvider } from '../components/common/Toast';
 import { resolveInitialTab } from '../ui/navigation';
-import { agentSummary, DOMAIN_STATUS_COPY, JOB_STATUS_COPY, JOB_TYPE_COPY, tabForJobType } from '../ui/presentation';
+import { agentSummary, DOMAIN_STATUS_COPY, JOB_STATUS_COPY, JOB_TYPE_COPY, jobProgressCopy, tabForJobType } from '../ui/presentation';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as apiClient from '../api/client';
 import type { JobEvent, HealthResponse, JobListResponse } from '../api/types';
@@ -19,16 +21,16 @@ import type { JobEvent, HealthResponse, JobListResponse } from '../api/types';
 describe('Common Components', () => {
   it('renders StatusBadge for all lifecycle statuses', () => {
     const { rerender } = render(<StatusBadge status="QUEUED" />);
-    expect(screen.getByText('Waiting to start')).toBeInTheDocument();
+    expect(screen.getByText('Waiting')).toBeInTheDocument();
 
     rerender(<StatusBadge status="RUNNING" />);
-    expect(screen.getByText('In progress')).toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
 
     rerender(<StatusBadge status="SUCCEEDED" />);
-    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
 
     rerender(<StatusBadge status="FAILED" />);
-    expect(screen.getByText('Could not complete')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
 
     rerender(<StatusBadge status="CANCELLED" />);
     expect(screen.getByText('Cancelled')).toBeInTheDocument();
@@ -132,7 +134,11 @@ describe('Common Components', () => {
       system: { os: 'darwin', python_version: '3.9.6', rocm_version: '6.2', torch_version: '2.2.0', gpus_detected: 0, gpus: [] },
       orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [],
     };
-    render(<Navbar health={health} isLoading={false} isError={false} />);
+    const onThemeChange = vi.fn();
+    render(<Navbar health={health} isLoading={false} isError={false} theme="system" onThemeChange={onThemeChange} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Color theme' }), { target: { value: 'light' } });
+    expect(onThemeChange).toHaveBeenCalledWith('light');
+    expect(screen.getByRole('option', { name: 'System' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
     expect(screen.getByText(/AMD execution unavailable/)).toBeInTheDocument();
@@ -164,6 +170,23 @@ describe('Common Components', () => {
     expect(screen.queryByRole('button', { name: 'Run comparison on AMD' })).not.toBeInTheDocument();
   });
 
+  it('makes AI Engineer goals understandable and marks execution goals unavailable without AMD compute', () => {
+    render(<ToastProvider><AIEngineerView amdComputeAvailable={false} /></ToastProvider>);
+    expect(screen.getByRole('button', { name: /Prepare this model/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Improve throughput/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Reduce latency/ })).toBeDisabled();
+    expect(screen.getAllByText('Requires AMD compute')).toHaveLength(2);
+    expect(screen.getByText(/AMD hardware validation is not performed/)).toBeInTheDocument();
+  });
+
+  it('uses the user-facing Forge stage labels', () => {
+    render(<ToastProvider><ForgeStudioView /></ToastProvider>);
+    for (const label of ['Model', 'Hardware', 'Runtime', 'Review', 'Build', 'Result']) {
+      expect(screen.getByText(label, { exact: true })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/immutable revision before preparation/)).toBeInTheDocument();
+  });
+
   it('keeps primary navigation focused on Models, Activity, and Optimize', () => {
     render(<Sidebar activeTab="runs" onTabChange={vi.fn()} />);
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Models');
@@ -188,7 +211,11 @@ describe('Common Components', () => {
   });
 
   it('keeps all status and type labels human-readable and truthful', () => {
-    expect(JOB_STATUS_COPY).toEqual({ QUEUED: 'Waiting to start', RUNNING: 'In progress', SUCCEEDED: 'Completed', FAILED: 'Could not complete', CANCELLED: 'Cancelled' });
+    expect(JOB_STATUS_COPY).toEqual({ QUEUED: 'Waiting', RUNNING: 'Running', SUCCEEDED: 'Ready', FAILED: 'Failed', CANCELLED: 'Cancelled' });
+    expect(jobProgressCopy('RUNNING', 'AGENT_CLAIMED')).toBe('Waiting');
+    expect(jobProgressCopy('RUNNING', 'MODEL_DOWNLOADING')).toBe('Downloading');
+    expect(jobProgressCopy('RUNNING', 'VERIFYING_DIGESTS')).toBe('Verifying');
+    expect(jobProgressCopy('RUNNING', 'BUILD_ARTIFACT')).toBe('Preparing');
     expect(JOB_TYPE_COPY.PREPARE_MODEL_FOR_AMD).toBe('Model preparation');
     expect(DOMAIN_STATUS_COPY.CONFIG_ONLY.explanation).toMatch(/Weights were not downloaded/);
     expect(DOMAIN_STATUS_COPY.CONFIG_ONLY.explanation).toMatch(/AMD execution was not performed/);
@@ -257,7 +284,7 @@ describe('Common Components', () => {
   it('never presents offline agents as connected in the compute panel', () => {
     const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [] };
     const offline = [{ agent_id: 'offline', name: 'Offline', hostname: 'laptop', status: 'OFFLINE' as const, last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD GPU'], capabilities: ['PREPARE_MODEL_FOR_AMD'] } }];
-    render(<Navbar health={health} isLoading={false} isError={false} agents={offline} />);
+    render(<Navbar health={health} isLoading={false} isError={false} agents={offline} theme="system" onThemeChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
     expect(screen.getByText('Offline')).toBeInTheDocument();
@@ -265,7 +292,7 @@ describe('Common Components', () => {
   });
 
   it('labels compute status as unknown when the service cannot be reached', () => {
-    render(<Navbar health={null} isLoading={false} isError agents={[]} />);
+    render(<Navbar health={null} isLoading={false} isError agents={[]} theme="system" onThemeChange={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Compute status unknown' }));
     expect(screen.getByText(/Connection status could not be confirmed/)).toBeInTheDocument();
   });

@@ -59,7 +59,7 @@ describe('Model Explorer materialization consent', () => {
   it('queues CONFIG_ONLY without weight consent by default', async () => {
     renderView();
     await inspectModel();
-    fireEvent.click(screen.getByRole('button', { name: /Prepare configuration only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Prepare setup/ }));
     await waitFor(() => expect(api.createJob).toHaveBeenCalledTimes(1));
     expect(api.createJob.mock.calls[0][0]).toMatchObject({
       materialization_mode: 'METADATA_ONLY',
@@ -102,7 +102,7 @@ describe('Model Explorer materialization consent', () => {
   it('retries a degraded observer for the same job instead of creating a duplicate', async () => {
     renderView();
     await inspectModel();
-    fireEvent.click(screen.getByRole('button', { name: /Prepare configuration only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Prepare setup/ }));
     await waitFor(() => expect(api.subscribeToJobEvents).toHaveBeenCalledTimes(1));
 
     const calls = api.subscribeToJobEvents.mock.calls as unknown as [string, { onError: () => void }][];

@@ -12,6 +12,7 @@ import { RunsView } from './components/runs/RunsView';
 import { ToastProvider } from './components/common/Toast';
 import { resolveInitialTab } from './ui/navigation';
 import { hasConnectedAmdCompute } from './ui/presentation';
+import { readThemePreference, resolveTheme, persistThemePreference, type ThemePreference } from './ui/theme';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'runs', 'forge', 'engineer', 'optimization'];
 
@@ -26,6 +27,7 @@ function getInitialJobId(): string | null {
 }
 
 export const App: React.FC = () => {
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
   const [selectedModelForForge, setSelectedModelForForge] = useState({
     modelId: 'Qwen/Qwen2.5-0.5B-Instruct',
@@ -56,6 +58,19 @@ export const App: React.FC = () => {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const applyTheme = () => {
+      const resolved = resolveTheme(theme, media.matches);
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+    applyTheme();
+    if (theme === 'system') media.addEventListener('change', applyTheme);
+    persistThemePreference(theme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [theme]);
 
   const {
     data: health,
@@ -112,6 +127,8 @@ export const App: React.FC = () => {
           isLoadingAgents={isLoadingAgents}
           isAgentsError={isAgentsError}
           onRetryAgents={() => { void refetchAgents(); }}
+          theme={theme}
+          onThemeChange={setTheme}
         />
         <div className="nav-rail"><Sidebar activeTab={activeTab} onTabChange={switchTab}/></div>
         <main className="flex-1 overflow-y-auto">
@@ -154,6 +171,7 @@ export const App: React.FC = () => {
               <AIEngineerView
                 selectedJobId={selectedJobId}
                 onJobCreated={handleJobCreated}
+                amdComputeAvailable={isLoadingHealth || isHealthError || isLoadingAgents || isAgentsError || !health ? null : hasConnectedAmdCompute(health, agents ?? [])}
               />
             )}
             {activeTab === 'optimization' && (

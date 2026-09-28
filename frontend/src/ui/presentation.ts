@@ -1,12 +1,23 @@
 import type { AgentInfo, DomainStatus, HealthResponse, JobStatus, JobType } from '../api/types';
 
 export const JOB_STATUS_COPY: Record<JobStatus, string> = {
-  QUEUED: 'Waiting to start',
-  RUNNING: 'In progress',
-  SUCCEEDED: 'Completed',
-  FAILED: 'Could not complete',
+  QUEUED: 'Waiting',
+  RUNNING: 'Running',
+  SUCCEEDED: 'Ready',
+  FAILED: 'Failed',
   CANCELLED: 'Cancelled',
 };
+
+/** Turns worker events into plain-language progress without changing their backend meaning. */
+export function jobProgressCopy(status: JobStatus | string, phase?: string | null): string {
+  if (status === 'FAILED' || status === 'CANCELLED' || status === 'SUCCEEDED') return JOB_STATUS_COPY[status];
+  const normalized = (phase || '').toUpperCase();
+  if (status === 'QUEUED' || normalized.includes('QUEUE') || normalized.includes('CLAIM')) return 'Waiting';
+  if (normalized.includes('DOWNLOAD') || normalized.includes('MATERIALIZATION')) return 'Downloading';
+  if (normalized.includes('VERIF')) return 'Verifying';
+  if (normalized.includes('PREPAR') || normalized.includes('BUILD') || normalized.includes('FINAL')) return 'Preparing';
+  return 'Running';
+}
 
 export const DOMAIN_STATUS_COPY: Record<DomainStatus, { label: string; explanation: string }> = {
   CONFIG_ONLY: {

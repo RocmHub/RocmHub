@@ -13,6 +13,7 @@ import { ToastProvider } from '../components/common/Toast';
 import { resolveInitialTab } from '../ui/navigation';
 import { agentSummary, DOMAIN_STATUS_COPY, JOB_STATUS_COPY, JOB_TYPE_COPY, tabForJobType } from '../ui/presentation';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import * as apiClient from '../api/client';
 import type { JobEvent, HealthResponse, JobListResponse } from '../api/types';
 
 describe('Common Components', () => {
@@ -35,14 +36,14 @@ describe('Common Components', () => {
 
   it('renders DomainStatusTag with informative descriptions', () => {
     const { rerender } = render(<DomainStatusTag status="CONFIG_ONLY" />);
-    expect(screen.getByText('Configuration ready')).toBeInTheDocument();
-    expect(screen.getByText('Configuration ready')).toHaveAttribute('title', DOMAIN_STATUS_COPY.CONFIG_ONLY.explanation);
+    expect(screen.getByText('Configuration prepared')).toBeInTheDocument();
+    expect(screen.getByText('Configuration prepared')).toHaveAttribute('title', DOMAIN_STATUS_COPY.CONFIG_ONLY.explanation);
 
     rerender(<DomainStatusTag status="PREPARED" />);
-    expect(screen.getByText('Model files prepared')).toBeInTheDocument();
+    expect(screen.getByText('Model prepared')).toBeInTheDocument();
 
     rerender(<DomainStatusTag status="EXECUTED" />);
-    expect(screen.getByText('Inference completed on AMD')).toBeInTheDocument();
+    expect(screen.getByText('Ran on AMD')).toBeInTheDocument();
 
     rerender(<DomainStatusTag status="NOT_MEASURED" />);
     expect(screen.getByText('Performance not measured')).toBeInTheDocument();
@@ -68,7 +69,7 @@ describe('Common Components', () => {
     expect(screen.getByText('PLANNING')).toBeInTheDocument();
   });
 
-  it('renders DashboardView with hardware notice and job history', () => {
+  it('renders the search-first start screen and recent activity', () => {
     const mockHealth: HealthResponse = {
       status: 'healthy',
       version: '0.1.0',
@@ -112,25 +113,19 @@ describe('Common Components', () => {
       />
     );
 
-    // One obvious product action and truthful environment context
-    expect(screen.getByRole('button', { name: 'Explore models' })).toBeInTheDocument();
-    expect(screen.getAllByText('No compute connected')).toHaveLength(2);
-    expect(screen.getByText(/Find and inspect public models without compute/)).toBeInTheDocument();
-    expect(screen.queryByText(/ROCm host/)).not.toBeInTheDocument();
-
-    // Recent work is presented as a continuation card, not an admin table
+    expect(screen.getByLabelText('Search Hugging Face models or paste a model ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Inspect model' })).toBeInTheDocument();
     expect(screen.getByText('Build')).toBeInTheDocument();
     expect(screen.getByText('Qwen2.5-0.5B-Instruct')).toBeInTheDocument();
   });
 
-  it('keeps an empty Home state useful without duplicating the hero action', () => {
+  it('keeps an empty Home state useful without inventing recent activity', () => {
     render(<DashboardView health={null} jobsList={{ items: [], total: 0, limit: 20, offset: 0 }} isLoadingJobs={false} onNavigate={vi.fn()} onSelectJob={vi.fn()} />);
-    expect(screen.getByText('No runs yet')).toBeInTheDocument();
-    expect(screen.getAllByText(/Model preparation and optimization studies will appear here/).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Explore models' })).toHaveLength(1);
+    expect(screen.getByText('No activity yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Inspect your first model' })).toBeInTheDocument();
   });
 
-  it('labels the service independently from compute and keeps runtime facts in technical details', () => {
+  it('shows compute state truthfully and keeps runtime facts in technical details', () => {
     const health: HealthResponse = {
       status: 'healthy', version: '0.1.0', rocm_available: false,
       host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true },
@@ -138,24 +133,23 @@ describe('Common Components', () => {
       orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [],
     };
     render(<Navbar health={health} isLoading={false} isError={false} />);
-    expect(screen.getByRole('button', { name: 'Service online' })).toBeInTheDocument();
-    expect(screen.queryByText('ROCm host ready')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Service online' }));
-    fireEvent.click(screen.getByText('Technical details'));
-    expect(screen.getByText('ROCm 6.2')).toBeInTheDocument();
-    expect(screen.getByText('HIP runtime / PyTorch 2.2.0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
+    expect(screen.getByText(/AMD execution unavailable/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Service details'));
+    expect(screen.getByText(/ROCm 6.2/)).toBeInTheDocument();
   });
 
-  it('keeps Model Explorer revision editable only under Advanced options with neutral preset language', () => {
+  it('keeps model revisions in advanced search options and avoids a fake catalog', () => {
     sessionStorage.clear();
     render(<ToastProvider><ModelExplorerView onSelectModelForForge={vi.fn()} onNavigate={vi.fn()} /></ToastProvider>);
-    const advanced = screen.getByText('Advanced options').closest('details');
+    const advanced = screen.getByText('Advanced search options').closest('details');
     expect(advanced).not.toHaveAttribute('open');
-    expect(advanced).toContainElement(screen.getByLabelText('Advanced revision'));
-    expect(screen.getByLabelText('Advanced revision')).toHaveValue('main');
+    expect(advanced).toContainElement(screen.getAllByLabelText('Advanced revision')[0]);
+    expect(screen.getAllByLabelText('Advanced revision')[0]).toHaveValue('main');
     expect(screen.queryByText('Production class')).not.toBeInTheDocument();
-    expect(screen.getByText('Larger instruction model')).toBeInTheDocument();
-    expect(screen.getByText('Inspect any public Hugging Face model, then choose the preparation path that fits your needs.')).toBeInTheDocument();
+    expect(screen.getAllByText('Larger instruction model').length).toBeGreaterThan(0);
+    expect(screen.getByText(/no catalog results are invented/)).toBeInTheDocument();
   });
 
   it('explains that Optimize currently prepares configuration comparisons, even when AMD is detected', () => {
@@ -170,14 +164,16 @@ describe('Common Components', () => {
     expect(screen.queryByRole('button', { name: 'Run comparison on AMD' })).not.toBeInTheDocument();
   });
 
-  it('keeps primary navigation focused on Home, Models, Runs, and Optimize', () => {
+  it('keeps primary navigation focused on Models, Activity, and Optimize', () => {
     render(<Sidebar activeTab="runs" onTabChange={vi.fn()} />);
-    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Home');
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Models');
-    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Runs');
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Activity');
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveTextContent('Optimize');
     expect(screen.queryByText('Forge')).not.toBeInTheDocument();
     expect(screen.queryByText('Engineer')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Tools/ }));
+    expect(screen.getByRole('menuitem', { name: /AI Engineer/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Forge Studio/ })).toBeInTheDocument();
   });
 
   it('routes job deep links to Runs and preserves legacy workflow routes', () => {
@@ -233,6 +229,23 @@ describe('Common Components', () => {
     expect(screen.queryByText('org/success-run')).not.toBeInTheDocument();
   });
 
+  it('shows an honest run timeline and result without implying AMD execution', async () => {
+    const job: JobListResponse['items'][number] = {
+      job_id: 'prepared-run', job_type: 'PREPARE_MODEL_FOR_AMD', model_id: 'Qwen/Qwen2.5-0.5B-Instruct', revision: 'main',
+      status: 'SUCCEEDED', domain_status: 'PREPARED', created_at: '2026-09-22T08:00:00Z', started_at: '2026-09-22T08:01:00Z',
+      completed_at: '2026-09-22T08:02:00Z', timeout_seconds: 600, output_dir: '/tmp/prepared-run', error_message: null, error_code: null,
+    };
+    const resultSpy = vi.spyOn(apiClient, 'fetchJobResult').mockResolvedValue({ job_id: job.job_id, job_type: job.job_type, job_status: 'SUCCEEDED', domain_status: 'PREPARED', output_dir: job.output_dir, completed_at: job.completed_at, result: { materialization: { cache_status: 'verified' } }, error_message: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><RunsView jobsList={{ items: [job], total: 1, limit: 100, offset: 0 }} isLoading={false} selectedJobId={job.job_id} onOpenJob={vi.fn()} /></QueryClientProvider>);
+    expect(await screen.findByText('Run timeline')).toBeInTheDocument();
+    expect(screen.getAllByText('Model prepared').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('AMD execution not performed').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Ran on AMD')).not.toBeInTheDocument();
+    expect(resultSpy).toHaveBeenCalledWith(job.job_id);
+    resultSpy.mockRestore();
+  });
+
   it('counts only accurately labeled Agent states', () => {
     expect(agentSummary([
       { agent_id: '1', name: 'Online', hostname: 'one', status: 'ONLINE', last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD'], capabilities: [] } },
@@ -241,28 +254,26 @@ describe('Common Components', () => {
     ])).toBe('1 connected · 1 working · 1 not connected · 0 interrupted');
   });
 
-  it('distinguishes compute unknown, connection-detail failure, empty, and offline states', () => {
+  it('never presents offline agents as connected in the compute panel', () => {
     const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [] };
-    const base = { health, jobsList: null, isLoadingJobs: false, onNavigate: vi.fn(), onSelectJob: vi.fn() };
-    const { rerender } = render(<DashboardView {...base} isLoadingAgents />);
-    expect(screen.getByLabelText('Loading connection details')).toBeInTheDocument();
-    expect(screen.getAllByText('Compute availability unknown')).toHaveLength(2);
-    rerender(<DashboardView {...base} isAgentsError onRetryAgents={vi.fn()} />);
-    expect(screen.getByText('Connection details couldn’t be loaded')).toBeInTheDocument();
-    expect(screen.getByText(/doesn’t mean there are no connections/)).toBeInTheDocument();
-    rerender(<DashboardView {...base} agents={[]} />);
-    expect(screen.getByText(/No external compute connections are registered/)).toBeInTheDocument();
-    expect(screen.getAllByText('No compute connected')).toHaveLength(2);
-    rerender(<DashboardView {...base} agents={[{ agent_id: 'offline', name: 'Offline', hostname: 'laptop', status: 'OFFLINE', last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: false, hip_detected: false, amd_gpu_count: 0, gpu_names: [], capabilities: [] } }]} />);
-    expect(screen.getByText('0 online or working · 1 offline · 0 interrupted')).toBeInTheDocument();
+    const offline = [{ agent_id: 'offline', name: 'Offline', hostname: 'laptop', status: 'OFFLINE' as const, last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD GPU'], capabilities: ['PREPARE_MODEL_FOR_AMD'] } }];
+    render(<Navbar health={health} isLoading={false} isError={false} agents={offline} />);
+    expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
+    expect(screen.getByText('Offline')).toBeInTheDocument();
     expect(screen.getByText('Not connected')).toBeInTheDocument();
-    expect(screen.getAllByText('No compute connected')).toHaveLength(2);
+  });
+
+  it('labels compute status as unknown when the service cannot be reached', () => {
+    render(<Navbar health={null} isLoading={false} isError agents={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Compute status unknown' }));
+    expect(screen.getByText(/Connection status could not be confirmed/)).toBeInTheDocument();
   });
 
   it('does not turn a failed recent-runs request into a false empty state', () => {
     const retry = vi.fn();
     render(<DashboardView health={null} jobsList={null} isLoadingJobs={false} isJobsError onRetryJobs={retry} onNavigate={vi.fn()} onSelectJob={vi.fn()} />);
-    expect(screen.getByText('Recent runs couldn’t be loaded')).toBeInTheDocument();
+    expect(screen.getByText('Recent activity couldn’t be loaded.')).toBeInTheDocument();
     expect(screen.queryByText('Start with a model')).not.toBeInTheDocument();
     screen.getByRole('button', { name: /Retry/ }).click();
     expect(retry).toHaveBeenCalledOnce();

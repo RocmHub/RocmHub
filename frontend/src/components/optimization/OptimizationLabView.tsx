@@ -12,7 +12,6 @@ import {
   Play, XCircle, CheckCircle2, BarChart3, Info, Check, ChevronDown,
 } from 'lucide-react';
 
-import optimizationLabHeroImg from '../../assets/visuals/rocmhub-optimize-hero.jpg';
 
 interface OptimizationLabViewProps {
   selectedJobId?: string | null;
@@ -21,8 +20,8 @@ interface OptimizationLabViewProps {
 }
 
 const OBJECTIVES = [
-  { id: 'MAX_THROUGHPUT', label: 'Max Throughput', desc: 'Tokens per second' },
-  { id: 'MIN_LATENCY', label: 'Min Latency', desc: 'Time to first token' },
+  { id: 'MAX_THROUGHPUT', label: 'Throughput', desc: 'More tokens per second' },
+  { id: 'MIN_LATENCY', label: 'Latency', desc: 'Lower time to first token' },
   { id: 'BALANCED', label: 'Balanced', desc: 'Throughput + VRAM footprint' },
 ];
 
@@ -202,26 +201,16 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   const activityTitle = activeJob?.status === 'QUEUED' ? 'Waiting for a worker' : 'Study in progress';
 
   return (
-    <div className="page-fade">
-      {/* ── HERO ─────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden border-b hairline min-h-[350px] flex items-center">
-        <img src={optimizationLabHeroImg} alt="Two abstract configuration paths meeting for comparison" className="hero-image absolute inset-0 w-full h-full object-cover object-center" />
-        <div className="hero-overlay absolute inset-0" />
-        <div className="relative z-10 page-shell py-14 md:py-16 w-full">
-          <p className="eyebrow mb-5">Optimization workspace</p>
-          <h1 className="page-title">Compare setup choices.<br/><span className="text-zinc-400">Measurements come later.</span></h1>
-          <p className="lede mt-5 max-w-2xl">Prepare a baseline and candidate configurations for review. This workspace does not currently run inference or collect performance measurements.</p>
-        </div>
-      </div>
-
-      <div className="page-shell py-10 space-y-6">
+    <div className="page-fade optimize-page">
+      <div className="page-shell py-8 md:py-10 space-y-6">
+        <header className="optimize-heading"><div><div className="eyebrow">Compare configurations</div><h1>Optimize</h1><p>Choose a model ID, a goal, and candidate configurations.</p></div><span className="optimize-state">Preparation only · no measurements yet</span></header>
         {/* ── WORKSPACE SETUP ─────────────────────────────────────── */}
           <div className="focus-panel p-5 md:p-8 space-y-7">
           <div role="note" aria-label="Hardware measurement availability" className="rounded-xl border border-amber-500/20 bg-amber-500/[.05] p-4 md:p-5">
             <div className="text-sm font-semibold text-amber-200">Comparison preparation only</div>
             <p className="text-sm text-zinc-400 mt-1 leading-relaxed">{capabilityMessage}</p>
           </div>
-          <div><div className="eyebrow mb-2">Study design</div><h2 className="text-2xl font-semibold tracking-[-.04em]">Define your comparison</h2><p className="text-sm text-zinc-500 mt-2">Choose a reference goal and one or more candidate precisions.</p></div>
+          <div><div className="eyebrow mb-2">Comparison setup</div><h2 className="text-2xl font-semibold tracking-[-.04em]">Build a candidate set</h2><p className="text-sm text-zinc-500 mt-2">Baseline and candidate configurations will be prepared. Results are not measured.</p></div>
 
           {/* Model + Objective row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -1,33 +1,44 @@
 import React, { useState } from 'react';
-import type { HealthResponse } from '../../api/types';
-import { Activity, ChevronDown, Menu, X } from 'lucide-react';
+import type { AgentInfo, HealthResponse } from '../../api/types';
+import { Activity, ChevronDown } from 'lucide-react';
+import { AGENT_STATUS_COPY, hasConnectedAmdCompute } from '../../ui/presentation';
 
 interface NavbarProps {
-  health: HealthResponse | null;
-  isLoading: boolean;
-  isError: boolean;
-  isMobileMenuOpen?: boolean;
-  onToggleMobileMenu?: () => void;
+  health: HealthResponse | null; isLoading: boolean; isError: boolean; agents?: AgentInfo[];
+  isLoadingAgents?: boolean; isAgentsError?: boolean; onRetryAgents?: () => void;
+  isMobileMenuOpen?: boolean; onToggleMobileMenu?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, isMobileMenuOpen, onToggleMobileMenu }) => {
-  const [details, setDetails] = useState(false);
-  const online = !isLoading && !isError && !!health;
+export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, agents = [], isLoadingAgents = false, isAgentsError = false, onRetryAgents }) => {
+  const [open, setOpen] = useState(false);
+  const connected = hasConnectedAmdCompute(health, agents);
+  const checking = isLoading || isLoadingAgents;
+  const unknown = !checking && (isError || isAgentsError || !health);
+  const label = checking ? 'Checking compute' : connected ? 'AMD compute connected' : unknown ? 'Compute status unknown' : 'No AMD compute';
   return <header className="product-header">
-    <div className="flex items-center gap-3">
-      <button onClick={onToggleMobileMenu} aria-label="Toggle navigation menu" className="mobile-menu-button md:hidden">{isMobileMenuOpen ? <X size={17}/> : <Menu size={17}/>}</button>
-      <div className="brand-mark" aria-hidden="true"><span/><span/></div>
-      <div><div className="font-semibold tracking-[-.035em] leading-none">ROCmHub</div><div className="hidden sm:block text-[9px] uppercase tracking-[.2em] text-zinc-600 mt-1.5">Open model infrastructure</div></div>
-    </div>
-    <div className="relative">
-      <button onClick={() => setDetails(value => !value)} aria-label={online ? 'Service online' : isLoading ? 'Checking service' : 'Service unavailable'} className="service-pill">
-        <span className={`status-dot ${online ? 'status-dot-online' : isLoading ? 'status-dot-pending' : 'status-dot-error'}`}/>
-        <span className="hidden sm:inline">{online ? 'Service online' : isLoading ? 'Connecting' : 'Service unavailable'}</span><ChevronDown size={13}/>
-      </button>
-      {details && <div className="service-popover">
-        <div className="flex gap-3"><div className="service-popover-icon"><Activity size={17}/></div><div><div className="text-sm font-semibold">Service status</div><p className="text-xs text-zinc-500 mt-1 leading-relaxed">{online ? 'ROCmHub is responding. Hardware measurement requires capable AMD compute and prepared model files.' : 'ROCmHub is unavailable. Try again shortly.'}</p></div></div>
-        <details className="mt-4 pt-3 border-t hairline"><summary className="text-[11px] text-zinc-500 cursor-pointer">Technical details</summary><div className="mt-2 text-[10px] font-mono text-zinc-600 space-y-1"><div>Version {health?.version || '—'}</div><div>{health?.host_platform.os || 'unknown'} · {health?.host_platform.arch || 'unknown'}</div><div>{health?.system.gpus_detected || 0} accelerator(s)</div><div>ROCm {health?.system.rocm_version || 'not detected'}</div><div>HIP runtime / PyTorch {health?.system.torch_version || 'not detected'}</div></div></details>
-      </div>}
+    <a className="brand-lockup" href="#dashboard" aria-label="ROCmHub home" onClick={() => window.dispatchEvent(new HashChangeEvent('hashchange'))}>
+      <span className="brand-symbol" aria-hidden="true"><i/><i/></span><span className="brand-name">ROCmHub</span>
+    </a>
+    <div className="header-end">
+      <div className="relative">
+        <button aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)} className="compute-indicator">
+          <span className={`compute-mark ${connected ? 'compute-mark-on' : isLoading || isLoadingAgents ? 'compute-mark-wait' : ''}`}/><span>{label}</span><ChevronDown size={13}/>
+        </button>
+        {open && <>
+          <button className="drawer-scrim" aria-label="Close compute panel" onClick={() => setOpen(false)}/>
+          <aside role="dialog" aria-label="Compute" className="compute-drawer">
+            <div className="drawer-heading"><div><div className="drawer-kicker">ROCmHub</div><h2>Compute</h2></div><button aria-label="Close compute panel" className="icon-button" onClick={() => setOpen(false)}>×</button></div>
+            <p className="drawer-intro">{unknown ? 'Connection status could not be confirmed. Retry or check the service before assuming no compute is available.' : connected ? 'Available compute targets for preparation and AMD execution.' : 'No AMD compute is available right now. Model inspection and configuration preparation still work.'}</p>
+            {!isLoading && !isError && health && <div className="compute-target"><span className={`compute-mark ${health.rocm_available ? 'compute-mark-on' : ''}`}/><div className="target-copy"><strong>{health.rocm_available ? 'Local AMD compute' : 'This service host'}</strong><span>{health.rocm_available ? 'ROCm execution available' : 'AMD execution unavailable'}</span></div><span className="target-status">{health.rocm_available ? 'Online' : '—'}</span></div>}
+            {isLoadingAgents ? <div className="drawer-loading" aria-label="Loading compute agents"/> : isAgentsError ? <div className="drawer-error" role="status"><span>Compute connections could not be loaded.</span><button onClick={onRetryAgents}>Retry</button></div> : agents.length === 0 ? <p className="drawer-empty">No remote compute agents registered.</p> : agents.map(agent => {
+              const online = agent.status === 'ONLINE' || agent.status === 'BUSY';
+              const amd = agent.capabilities.rocm_detected && agent.capabilities.amd_gpu_count > 0;
+              return <div className="compute-target" key={agent.agent_id}><span className={`compute-mark ${online && amd ? 'compute-mark-on' : ''}`}/><div className="target-copy"><strong>{agent.name}</strong><span>{amd ? `${agent.capabilities.gpu_names.join(', ') || 'AMD GPU'} · ROCm execution` : 'Preparation only'}</span><span className="target-meta">{agent.hostname} · Last seen {new Date(agent.last_seen).toLocaleString()}</span></div><span className={`target-status ${online ? 'target-status-live' : ''}`}>{AGENT_STATUS_COPY[agent.status]}</span><details className="technical-details"><summary>Technical details</summary><p>{agent.capabilities.capabilities.join(', ') || 'No capabilities reported'} · <code>{agent.agent_id}</code></p></details></div>;
+            })}
+            <details className="technical-details service-technical"><summary><Activity size={13}/> Service details</summary><p>{isError ? 'Service status unavailable' : `Service ${health?.status || 'checking'} · ${health?.host_platform.os || 'unknown'} · ROCm ${health?.system.rocm_version || 'not detected'} · PyTorch ${health?.system.torch_version || 'not detected'}`}</p></details>
+          </aside>
+        </>}
+      </div>
     </div>
   </header>;
 };

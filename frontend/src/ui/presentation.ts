@@ -10,15 +10,15 @@ export const JOB_STATUS_COPY: Record<JobStatus, string> = {
 
 export const DOMAIN_STATUS_COPY: Record<DomainStatus, { label: string; explanation: string }> = {
   CONFIG_ONLY: {
-    label: 'Configuration ready',
+    label: 'Configuration prepared',
     explanation: 'Weights were not downloaded. AMD execution was not performed.',
   },
   PREPARED: {
-    label: 'Model files prepared',
+    label: 'Model prepared',
     explanation: 'Model files were downloaded and verified. AMD execution was not performed.',
   },
   EXECUTED: {
-    label: 'Inference completed on AMD',
+    label: 'Ran on AMD',
     explanation: 'Inference was executed on physical AMD ROCm hardware.',
   },
   NOT_MEASURED: {

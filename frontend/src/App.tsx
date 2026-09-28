@@ -10,8 +10,8 @@ import { AIEngineerView } from './components/engineer/AIEngineerView';
 import { OptimizationLabView } from './components/optimization/OptimizationLabView';
 import { RunsView } from './components/runs/RunsView';
 import { ToastProvider } from './components/common/Toast';
-import { tabForJobType } from './ui/presentation';
 import { resolveInitialTab } from './ui/navigation';
+import { hasConnectedAmdCompute } from './ui/presentation';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'runs', 'forge', 'engineer', 'optimization'];
 
@@ -27,11 +27,11 @@ function getInitialJobId(): string | null {
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedModelForForge, setSelectedModelForForge] = useState({
     modelId: 'Qwen/Qwen2.5-0.5B-Instruct',
     revision: 'main',
   });
+  const [selectedModelId, setSelectedModelId] = useState('');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(getInitialJobId);
 
   const navigateTo = (tab: NavTab) => {
@@ -87,9 +87,7 @@ export const App: React.FC = () => {
 
   const handleSelectJob = (jobId: string) => {
     setSelectedJobId(jobId);
-    const job = jobsList?.items.find((j) => j.job_id === jobId);
-    if (job) navigateTo(tabForJobType(job.job_type));
-    else navigateTo('runs');
+    navigateTo('runs');
   };
 
   const handleOpenJob = (jobId: string, tab: NavTab) => {
@@ -110,20 +108,13 @@ export const App: React.FC = () => {
           health={health ?? null}
           isLoading={isLoadingHealth}
           isError={isHealthError}
-          isMobileMenuOpen={isMobileMenuOpen}
-          onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+          agents={agents ?? []}
+          isLoadingAgents={isLoadingAgents}
+          isAgentsError={isAgentsError}
+          onRetryAgents={() => { void refetchAgents(); }}
         />
-
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar
-            activeTab={activeTab}
-            onTabChange={switchTab}
-            isOpenMobile={isMobileMenuOpen}
-            onCloseMobile={() => setIsMobileMenuOpen(false)}
-          />
-
-          {/* Main content — full remaining width, each view manages its own max-width */}
-          <main className="flex-1 overflow-y-auto">
+        <div className="nav-rail"><Sidebar activeTab={activeTab} onTabChange={switchTab}/></div>
+        <main className="flex-1 overflow-y-auto">
             {activeTab === 'dashboard' && (
               <DashboardView
                 health={health ?? null}
@@ -135,6 +126,7 @@ export const App: React.FC = () => {
                 onRetryJobs={() => { void refetchJobs(); }}
                 onNavigate={switchTab}
                 onSelectJob={handleSelectJob}
+                onSearchModel={(modelId) => { setSelectedModelId(modelId); setSelectedJobId(null); switchTab('explorer'); }}
                 agents={agents ?? []}
                 isLoadingAgents={isLoadingAgents}
                 isAgentsError={isAgentsError}
@@ -146,6 +138,7 @@ export const App: React.FC = () => {
                 onSelectModelForForge={handleSelectModelForForge}
                 onNavigate={switchTab}
                 selectedJobId={selectedJobId}
+                initialModelId={selectedModelId || undefined}
               />
             )}
             {activeTab === 'runs' && <RunsView jobsList={jobsList ?? null} isLoading={isLoadingJobs} isError={isJobsError} selectedJobId={selectedJobId} onRetry={() => { void refetchJobs(); }} onOpenJob={handleOpenJob} />}
@@ -167,11 +160,10 @@ export const App: React.FC = () => {
               <OptimizationLabView
                 selectedJobId={selectedJobId}
                 onJobCreated={handleJobCreated}
-                amdComputeAvailable={isLoadingHealth || isHealthError || !health ? null : health.rocm_available}
+                amdComputeAvailable={isLoadingHealth || isHealthError || isLoadingAgents || isAgentsError || !health ? null : hasConnectedAmdCompute(health, agents ?? [])}
               />
             )}
-          </main>
-        </div>
+        </main>
       </div>
     </ToastProvider>
   );

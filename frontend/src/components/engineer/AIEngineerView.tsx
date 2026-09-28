@@ -13,7 +13,6 @@ import {
   Shield, Zap, Timer, Layers,
 } from 'lucide-react';
 
-import aiEngineerHeroImg from '../../assets/visuals/ai_engineer_hero.svg';
 
 interface AIEngineerViewProps {
   selectedJobId?: string | null;
@@ -212,24 +211,9 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
   const failureMessage = rawFailure.includes('MODEL_NOT_FOUND') ? 'The model could not be resolved. Check repository access and the model ID, then retry.' : rawFailure;
 
   return (
-    <div className="page-fade">
-      {/* ── HERO ─────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden border-b hairline min-h-[290px] flex items-center">
-        <div
-          className="absolute inset-0 flex items-center justify-end opacity-25 pointer-events-none"
-          style={{ overflow: 'hidden' }}
-        >
-          <img src={aiEngineerHeroImg} alt="" className="h-[280px] mr-12 opacity-70" />
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-r from-[#09090b] via-[#09090b]/95 to-transparent" />
-        <div className="relative z-10 page-shell py-12">
-          <p className="eyebrow mb-5">Intelligent model preparation</p>
-          <h1 className="page-title">Tell us the outcome.<br/><span className="text-zinc-500">Engineer the path.</span></h1>
-          <p className="text-base text-zinc-500 mt-5 max-w-xl">Set an objective and let ROCmHub inspect, plan, and recommend the safest path for your model.</p>
-        </div>
-      </div>
-
-      <div className="page-shell py-10 space-y-8">
+    <div className="page-fade engineer-page">
+      <header className="engineer-header page-shell"><div><div className="eyebrow">Guided model workflow</div><h1>AI Engineer</h1><p>Tell us what you want to achieve. Review the recommendation before preparing anything.</p></div></header>
+      <div className="page-shell py-8 space-y-8">
         {/* ── OBJECTIVE SELECTION ──────────────────────────────────── */}
         <div className="space-y-3">
           <h2 className="text-2xl font-semibold tracking-[-.03em]">What do you want to accomplish?</h2>

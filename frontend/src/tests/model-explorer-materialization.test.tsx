@@ -68,6 +68,18 @@ describe('Model Explorer materialization consent', () => {
     });
   });
 
+  it('opens a model workspace with files and AMD compatibility clearly separated', async () => {
+    renderView();
+    await inspectModel();
+    expect(screen.getByRole('navigation', { name: 'Model workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+    expect(screen.getByText('Repository contents')).toBeInTheDocument();
+    expect(screen.getByText(/Inspection does not download or materialize model weights/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Compatibility' }));
+    expect(screen.getByText('Not tested on AMD hardware yet.')).toBeInTheDocument();
+  });
+
   it('requires a separate checked confirmation before FULL_WEIGHTS job creation', async () => {
     renderView();
     await inspectModel();

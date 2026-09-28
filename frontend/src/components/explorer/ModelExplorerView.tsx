@@ -66,5 +66,5 @@ return <div className="page-fade min-h-full model-workspace page-shell">
   {jobResult?.job_status==='CANCELLED'&&<section className="focus-panel mt-6 p-6 border border-amber-500/20"><h2 className="font-semibold">Cancelled safely</h2><p className="text-sm text-zinc-500 mt-2">This job did not publish a complete cache entry. You can retry when ready.</p><button className="btn-ghost mt-4" onClick={retryPreparation}><RotateCcw size={13}/>Retry materialization</button></section>}
   </div>
 </div>};
-const Metric=({label,value}:{label:string;value:string})=><div className="bg-[#101012] p-5 min-w-0"><div className="text-[10px] uppercase tracking-widest text-zinc-600">{label}</div><div className="mt-2 text-sm font-semibold truncate" title={value}>{value}</div></div>;
+const Metric=({label,value}:{label:string;value:string})=><div className="surface-secondary p-5 min-w-0"><div className="text-[10px] uppercase tracking-widest text-zinc-600">{label}</div><div className="mt-2 text-sm font-semibold truncate" title={value}>{value}</div></div>;
 const Detail=({label,value}:{label:string;value:string})=><div className="flex gap-3 justify-between p-3 bg-white/[.025] rounded-lg"><span className="text-zinc-600">{label}</span><span className="font-mono text-zinc-400 truncate max-w-[60%]">{value}</span></div>;

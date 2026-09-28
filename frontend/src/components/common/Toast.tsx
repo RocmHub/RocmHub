@@ -70,6 +70,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return (
             <div
               key={t.id}
+              data-toast-type={t.type}
               className={`pointer-events-auto animate-slide-in-right flex items-start gap-3 px-4 py-3.5 rounded-xl border backdrop-blur-xl shadow-2xl max-w-[380px] ${c.bg}`}
             >
               <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${c.icon}`} />

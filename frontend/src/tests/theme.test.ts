@@ -24,6 +24,14 @@ describe('theme preference', () => {
     expect(resolveTheme('dark', true)).toBe('dark');
   });
 
+  it('keeps explicit Light when the system prefers Dark', () => {
+    expect(resolveTheme('light', false)).toBe('light');
+  });
+
+  it('keeps explicit Dark when the system prefers Light', () => {
+    expect(resolveTheme('dark', true)).toBe('dark');
+  });
+
   it('falls back to the system preference if browser storage is unavailable', () => {
     expect(readThemePreference({ getItem: () => { throw new Error('Storage blocked'); } })).toBe('system');
     expect(() => persistThemePreference('light', { setItem: () => { throw new Error('Storage blocked'); } })).not.toThrow();

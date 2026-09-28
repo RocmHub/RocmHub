@@ -4,6 +4,8 @@ import { createJob, fetchJob, fetchJobResult, cancelJob } from '../../api/client
 import { subscribeToJobEvents } from '../../api/sse';
 import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
+import { DOMAIN_STATUS_COPY } from '../../ui/presentation';
+import { resultLabel } from '../../ui/presentation';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
 import {
@@ -301,9 +303,6 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold text-content-primary">{isRunning ? 'Experiment running' : 'Experiment record'}</h3>
-                <span className="text-[11px] font-mono text-content-muted bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
-                  {activeJob.job_id}
-                </span>
                 <StatusBadge status={activeJob.status} />
                 <DomainStatusTag status={activeJob.domain_status} />
               </div>
@@ -314,10 +313,11 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 </button>
               )}
             </div>
+            <details><summary className="text-[11px] text-content-muted cursor-pointer">Technical details</summary><p className="mt-2 font-mono text-[10px] text-content-muted break-all">Run ID: {activeJob.job_id}</p></details>
 
             {isRunning && (
-              <div className="grid md:grid-cols-3 gap-3" aria-label="Experiment progress">
-                {[{name:'Baseline',strategy:'FP16'},...strategies.slice(0,2).map((strategy,index)=>({name:`Candidate ${String.fromCharCode(65+index)}`,strategy:strategy.toUpperCase()}))].map((lane,index)=><div key={lane.name} className="p-5 rounded-2xl bg-white/[.025] border hairline"><div className="flex items-center justify-between"><span className="text-sm font-semibold">{lane.name}</span><span className="font-mono text-[10px] text-zinc-600">{lane.strategy}</span></div><div className="h-1.5 rounded-full bg-white/[.05] mt-7 overflow-hidden"><div className={`h-full bg-emerald-400/80 animate-pulse ${index===0?'w-4/5':index===1?'w-3/5':'w-2/5'}`}/></div><div className="text-[11px] text-zinc-500 mt-3">{index===0?'Preparing reference':'Preparing candidate'}</div></div>)}
+              <div className="grid md:grid-cols-3 gap-3" aria-label="Experiment activity">
+                {[{name:'Baseline',strategy:'FP16'},...strategies.slice(0,2).map((strategy,index)=>({name:`Candidate ${String.fromCharCode(65+index)}`,strategy:strategy.toUpperCase()}))].map((lane,index)=><div key={lane.name} className="p-5 rounded-2xl bg-white/[.025] border hairline"><div className="flex items-center justify-between"><span className="text-sm font-semibold">{lane.name}</span><span className="font-mono text-[10px] text-zinc-500">{lane.strategy}</span></div><div className="flex items-center gap-2 mt-7 text-[11px] text-zinc-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80 animate-pulse"/>{index===0?'Preparing reference':'Preparing candidate'}</div><div className="text-[11px] text-zinc-600 mt-2">Waiting for result</div></div>)}
               </div>
             )}
 
@@ -343,8 +343,8 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                       : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                     <span className={`text-sm font-semibold ${jobResult.job_status === 'FAILED' ? 'text-amber-300' : 'text-emerald-400'}`}>
                       {jobResult.job_status === 'FAILED'
-                        ? 'Experiment plan ready — hardware run unavailable'
-                        : `Optimization complete — ${jobResult.domain_status === 'CONFIG_ONLY' ? 'ready for ROCm validation' : (jobResult.domain_status || 'results ready')}`}
+                        ? 'The optimization study could not complete'
+                        : `Optimization study completed${jobResult.domain_status ? ` · ${DOMAIN_STATUS_COPY[jobResult.domain_status].label}` : ''}`}
                     </span>
                   </div>
                 </div>
@@ -359,7 +359,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                   <Info className="w-4 h-4 text-content-muted shrink-0 mt-0.5" />
                   <p className="text-content-secondary leading-relaxed">
                     On hosts without a physical AMD GPU, throughput and latency are reported as{' '}
-                    <span className="font-mono font-semibold text-amber-400">NOT_MEASURED</span>.
+                    <span className="font-semibold text-amber-400">not measured</span>.
                     Real hardware benchmarks require a ROCm-capable GPU.
                   </p>
                 </div>
@@ -408,7 +408,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                               ? <span className="font-mono">{Number(jobResult.result.baseline.benchmark_result.ttft_ms).toFixed(1)} ms</span>
                               : <DomainStatusTag status="NOT_MEASURED" />}
                           </td>
-                          <td className="hidden sm:table-cell px-4 py-3 text-content-muted font-mono text-[11px]">REFERENCE</td>
+                          <td className="hidden sm:table-cell px-4 py-3 text-content-muted text-[11px]">Reference</td>
                         </tr>
 
                         {/* Candidates */}
@@ -436,7 +436,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                                       : <DomainStatusTag status="NOT_MEASURED" />}
                                   </td>
                                   <td className="hidden sm:table-cell px-4 py-3 text-content-secondary font-mono text-[11px]">
-                                    {comp?.verdict || (cand.measured ? 'EVALUATED' : 'NOT_MEASURED')}
+                                    {resultLabel(comp?.verdict) || (cand.measured ? 'Evaluated' : 'Not measured')}
                                   </td>
                                 </tr>
                               );
@@ -448,7 +448,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                                 <td className="px-4 py-3"><DomainStatusTag status="CONFIG_ONLY" /></td>
                                 <td className="px-4 py-3"><DomainStatusTag status="NOT_MEASURED" /></td>
                                 <td className="px-4 py-3"><DomainStatusTag status="NOT_MEASURED" /></td>
-                                <td className="px-4 py-3 text-content-muted font-mono text-[11px]">NOT_MEASURED</td>
+                                <td className="px-4 py-3 text-content-muted text-[11px]">Not measured</td>
                               </tr>
                             ))
                         }

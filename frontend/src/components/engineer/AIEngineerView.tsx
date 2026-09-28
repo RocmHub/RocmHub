@@ -6,6 +6,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { DomainStatusTag } from '../common/DomainStatusTag';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
+import { domainStatusLabel } from '../../ui/presentation';
 import {
   Play, XCircle, CheckCircle2, Clock, RotateCcw,
   AlertCircle, ChevronDown, ChevronUp,
@@ -206,8 +207,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
   const failed = jobResult?.job_status === 'FAILED' || jobResult?.domain_status === 'FAILED' || jobResult?.result?.status === 'FAILED' || activeJob?.status === 'FAILED' || activeJob?.domain_status === 'FAILED';
   const cancelled = jobResult?.job_status === 'CANCELLED' || activeJob?.status === 'CANCELLED';
   const selectedObj = OBJECTIVES.find(o => o.id === objective);
-  const activitySteps = ['Inspecting model', 'Checking environment', 'Preparing plan', 'Evaluating result', 'Finalizing recommendation'];
-  const activeActivity = Math.min(4, Math.max(0, Math.floor(jobEvents.length / 2)));
+  const latestActivity = jobEvents.at(-1);
   const rawFailure = String(jobResult?.error_message || jobResult?.result?.errors_encountered?.[0] || jobResult?.result?.reasons?.[0] || launchError || 'The engineer stopped before producing a verified recommendation.');
   const failureMessage = rawFailure.includes('MODEL_NOT_FOUND') ? 'The model could not be resolved. Check repository access and the model ID, then retry.' : rawFailure;
 
@@ -347,7 +347,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
             {isRunning && !jobResult && (
               <div className="focus-panel p-6 md:p-8 order-1" aria-label="Engineer activity">
                 <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Engineer activity</div><h3 className="text-xl font-semibold">Building a recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
-                <div className="grid sm:grid-cols-5 gap-2 mt-7">{activitySteps.map((step,index)=><div key={step} className={`p-4 rounded-xl border ${index<activeActivity?'bg-emerald-500/[.05] border-emerald-500/15':index===activeActivity?'bg-red-500/[.06] border-red-500/25':'bg-white/[.02] hairline'}`}><div className={`w-2 h-2 rounded-full mb-5 ${index<activeActivity?'bg-emerald-400':index===activeActivity?'bg-red-400 animate-pulse':'bg-zinc-700'}`}/><div className={`text-xs leading-snug ${index<=activeActivity?'text-zinc-200':'text-zinc-600'}`}>{step}</div></div>)}</div>
+                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{latestActivity?.message || 'Waiting for the first activity update'}</span></div><p className="text-xs text-zinc-600 mt-2">Live activity · no completion percentage is estimated</p></div>
               </div>
             )}
             {/* Session header */}
@@ -355,9 +355,6 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-content-primary">{isRunning ? 'Engineer at work' : 'Session record'}</h3>
-                  <span className="text-[11px] font-mono text-content-muted bg-surface-elevated px-2 py-0.5 rounded border border-surface-border">
-                    {activeJob.job_id}
-                  </span>
                   <StatusBadge status={activeJob.status} />
                   <DomainStatusTag status={activeJob.domain_status} />
                 </div>
@@ -368,6 +365,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   </button>
                 )}
               </div>
+              <details className="mb-3"><summary className="text-[11px] text-content-muted cursor-pointer">Technical details</summary><p className="mt-2 font-mono text-[10px] text-content-muted break-all">Run ID: {activeJob.job_id}</p></details>
 
               {/* Agent activity — product-level view of events */}
               {jobEvents.length > 0 && (
@@ -464,7 +462,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                     <div className="p-3 rounded-lg bg-surface-elevated border border-surface-border">
                       <div className="text-[11px] text-content-muted mb-1">Preparation</div>
                       <div className="text-xs font-bold text-emerald-400">
-                        {(jobResult.result.build_manifest?.status || jobResult.domain_status) === 'CONFIG_ONLY' ? 'Plan ready' : (jobResult.result.build_manifest?.status || jobResult.domain_status || 'Ready')}
+                        {domainStatusLabel(jobResult.result.build_manifest?.status || jobResult.domain_status) || 'Recommendation ready'}
                       </div>
                     </div>
                   </div>
@@ -478,7 +476,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                       {jobResult.result.reasons.map((reason: string, idx: number) => (
                         <li key={idx} className="flex items-start gap-2 text-xs text-content-secondary">
                           <span className="text-accent-red mt-0.5 shrink-0">›</span>
-                          <span className="leading-relaxed">{reason.replace('Model configuration prepared in CONFIG_ONLY mode (weights not materialized). Real AMD execution was not performed.', 'Configuration is ready. Continue on a ROCm host for weight materialization and hardware validation.')}</span>
+                          <span className="leading-relaxed">{reason.replace('Model configuration prepared in CONFIG_ONLY mode (weights not materialized). Real AMD execution was not performed.', 'Configuration is ready. Model weights were not materialized, and AMD execution was not performed.')}</span>
                         </li>
                       ))}
                     </ul>

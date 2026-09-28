@@ -8,14 +8,16 @@ import { ModelExplorerView } from './components/explorer/ModelExplorerView';
 import { ForgeStudioView } from './components/forge/ForgeStudioView';
 import { AIEngineerView } from './components/engineer/AIEngineerView';
 import { OptimizationLabView } from './components/optimization/OptimizationLabView';
+import { RunsView } from './components/runs/RunsView';
 import { ToastProvider } from './components/common/Toast';
+import { tabForJobType } from './ui/presentation';
+import { resolveInitialTab } from './ui/navigation';
 
-const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'forge', 'engineer', 'optimization'];
+const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'runs', 'forge', 'engineer', 'optimization'];
 
 function getInitialTab(): NavTab {
   if (typeof window === 'undefined') return 'dashboard';
-  const hash = window.location.hash.replace('#', '').toLowerCase();
-  return VALID_TABS.includes(hash as NavTab) ? (hash as NavTab) : 'dashboard';
+  return resolveInitialTab(window.location.hash, window.location.search);
 }
 
 function getInitialJobId(): string | null {
@@ -64,15 +66,16 @@ export const App: React.FC = () => {
     queryFn: fetchHealth,
     refetchInterval: 10000,
   });
-  const {data: agents} = useQuery({queryKey:['agents'],queryFn:fetchAgents,refetchInterval:10000});
+  const {data: agents, isLoading: isLoadingAgents, isError: isAgentsError, refetch: refetchAgents} = useQuery({queryKey:['agents'],queryFn:fetchAgents,refetchInterval:10000});
 
   const {
     data: jobsList,
     isLoading: isLoadingJobs,
+    isError: isJobsError,
     refetch: refetchJobs,
   } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => fetchJobs({ limit: 20 }),
+    queryFn: () => fetchJobs({ limit: 100 }),
     refetchInterval: 5000,
   });
 
@@ -85,13 +88,14 @@ export const App: React.FC = () => {
   const handleSelectJob = (jobId: string) => {
     setSelectedJobId(jobId);
     const job = jobsList?.items.find((j) => j.job_id === jobId);
-    if (job?.job_type === 'ENGINEER') {
-      navigateTo('engineer');
-    } else if (job?.job_type === 'OPTIMIZATION') {
-      navigateTo('optimization');
-    } else {
-      navigateTo('forge');
-    }
+    if (job) navigateTo(tabForJobType(job.job_type));
+    else navigateTo('runs');
+  };
+
+  const handleOpenJob = (jobId: string, tab: NavTab) => {
+    if (!jobId) { setSelectedJobId(null); navigateTo(tab); return; }
+    setSelectedJobId(jobId);
+    navigateTo(tab);
   };
 
   const handleJobCreated = (jobId: string) => {
@@ -125,17 +129,24 @@ export const App: React.FC = () => {
                 health={health ?? null}
                 jobsList={jobsList ?? null}
                 isLoadingJobs={isLoadingJobs}
+                isJobsError={isJobsError}
+                onRetryJobs={() => { void refetchJobs(); }}
                 onNavigate={switchTab}
                 onSelectJob={handleSelectJob}
                 agents={agents ?? []}
+                isLoadingAgents={isLoadingAgents}
+                isAgentsError={isAgentsError}
+                onRetryAgents={() => { void refetchAgents(); }}
               />
             )}
             {activeTab === 'explorer' && (
               <ModelExplorerView
                 onSelectModelForForge={handleSelectModelForForge}
                 onNavigate={switchTab}
+                selectedJobId={selectedJobId}
               />
             )}
+            {activeTab === 'runs' && <RunsView jobsList={jobsList ?? null} isLoading={isLoadingJobs} isError={isJobsError} selectedJobId={selectedJobId} onRetry={() => { void refetchJobs(); }} onOpenJob={handleOpenJob} />}
             {activeTab === 'forge' && (
               <ForgeStudioView
                 initialModelId={selectedModelForForge.modelId}

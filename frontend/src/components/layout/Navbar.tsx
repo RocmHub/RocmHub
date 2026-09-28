@@ -1,5 +1,33 @@
-import React,{useState} from 'react';
-import type {HealthResponse} from '../../api/types';
-import {Activity,ChevronDown,Menu,X} from 'lucide-react';
-interface NavbarProps{health:HealthResponse|null;isLoading:boolean;isError:boolean;isMobileMenuOpen?:boolean;onToggleMobileMenu?:()=>void}
-export const Navbar:React.FC<NavbarProps>=({health,isLoading,isError,isMobileMenuOpen,onToggleMobileMenu})=>{const[details,setDetails]=useState(false);const online=!isLoading&&!isError&&!!health;return <header className="h-16 shrink-0 border-b hairline bg-[#09090b]/90 backdrop-blur-xl flex items-center justify-between px-5 md:px-7 sticky top-0 z-40"><div className="flex items-center gap-3"><button onClick={onToggleMobileMenu} aria-label="Toggle navigation menu" className="md:hidden w-9 h-9 rounded-lg border hairline flex items-center justify-center text-zinc-300">{isMobileMenuOpen?<X size={17}/>:<Menu size={17}/>}</button><div className="relative w-8 h-8 rounded-[9px] bg-[#e5222e] flex items-center justify-center overflow-hidden shadow-[0_0_28px_rgba(229,34,46,.3)]"><span className="absolute w-7 h-[2px] bg-white rotate-[-35deg]"/><span className="absolute w-4 h-[2px] bg-white rotate-[-35deg] translate-y-2"/></div><div><div className="font-semibold tracking-[-.02em] leading-none">ROCmHub</div><div className="hidden sm:block text-[9px] uppercase tracking-[.18em] text-zinc-600 mt-1">Model infrastructure</div></div></div><div className="relative"><button onClick={()=>setDetails(v=>!v)} aria-label={online?'Service online':isLoading?'Checking service':'Service unavailable'} className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-white/[.05] text-xs text-zinc-400"><span className={`w-2 h-2 rounded-full ${online?'bg-emerald-400':isLoading?'bg-zinc-500 animate-pulse':'bg-red-500'}`}/><span className="hidden sm:inline">{online?'Service online':isLoading?'Connecting':'Service unavailable'}</span><ChevronDown size={13}/></button>{details&&<div className="absolute right-0 top-11 w-72 focus-panel p-4 shadow-2xl"><div className="flex gap-3"><Activity className="text-red-400" size={18}/><div><div className="text-sm font-semibold">Service status</div><p className="text-xs text-zinc-500 mt-1 leading-relaxed">{online?'The ROCmHub service is responding. Hardware measurement requires AMD compute and materialized model files.':'The ROCmHub service is unavailable. Try again shortly.'}</p></div></div><details className="mt-4 pt-3 border-t hairline"><summary className="text-[11px] text-zinc-500 cursor-pointer">Technical details</summary><div className="mt-2 text-[10px] font-mono text-zinc-600 space-y-1"><div>version {health?.version||'—'}</div><div>{health?.host_platform.os||'unknown'} · {health?.host_platform.arch||'unknown'}</div><div>{health?.system.gpus_detected||0} accelerator(s)</div><div>ROCm {health?.system.rocm_version||'not detected'}</div><div>HIP runtime / PyTorch {health?.system.torch_version||'not detected'}</div></div></details></div>}</div></header>}
+import React, { useState } from 'react';
+import type { HealthResponse } from '../../api/types';
+import { Activity, ChevronDown, Menu, X } from 'lucide-react';
+
+interface NavbarProps {
+  health: HealthResponse | null;
+  isLoading: boolean;
+  isError: boolean;
+  isMobileMenuOpen?: boolean;
+  onToggleMobileMenu?: () => void;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, isMobileMenuOpen, onToggleMobileMenu }) => {
+  const [details, setDetails] = useState(false);
+  const online = !isLoading && !isError && !!health;
+  return <header className="product-header">
+    <div className="flex items-center gap-3">
+      <button onClick={onToggleMobileMenu} aria-label="Toggle navigation menu" className="mobile-menu-button md:hidden">{isMobileMenuOpen ? <X size={17}/> : <Menu size={17}/>}</button>
+      <div className="brand-mark" aria-hidden="true"><span/><span/></div>
+      <div><div className="font-semibold tracking-[-.035em] leading-none">ROCmHub</div><div className="hidden sm:block text-[9px] uppercase tracking-[.2em] text-zinc-600 mt-1.5">Open model infrastructure</div></div>
+    </div>
+    <div className="relative">
+      <button onClick={() => setDetails(value => !value)} aria-label={online ? 'Service online' : isLoading ? 'Checking service' : 'Service unavailable'} className="service-pill">
+        <span className={`status-dot ${online ? 'status-dot-online' : isLoading ? 'status-dot-pending' : 'status-dot-error'}`}/>
+        <span className="hidden sm:inline">{online ? 'Service online' : isLoading ? 'Connecting' : 'Service unavailable'}</span><ChevronDown size={13}/>
+      </button>
+      {details && <div className="service-popover">
+        <div className="flex gap-3"><div className="service-popover-icon"><Activity size={17}/></div><div><div className="text-sm font-semibold">Service status</div><p className="text-xs text-zinc-500 mt-1 leading-relaxed">{online ? 'ROCmHub is responding. Hardware measurement requires capable AMD compute and prepared model files.' : 'ROCmHub is unavailable. Try again shortly.'}</p></div></div>
+        <details className="mt-4 pt-3 border-t hairline"><summary className="text-[11px] text-zinc-500 cursor-pointer">Technical details</summary><div className="mt-2 text-[10px] font-mono text-zinc-600 space-y-1"><div>Version {health?.version || '—'}</div><div>{health?.host_platform.os || 'unknown'} · {health?.host_platform.arch || 'unknown'}</div><div>{health?.system.gpus_detected || 0} accelerator(s)</div><div>ROCm {health?.system.rocm_version || 'not detected'}</div><div>HIP runtime / PyTorch {health?.system.torch_version || 'not detected'}</div></div></details>
+      </div>}
+    </div>
+  </header>;
+};

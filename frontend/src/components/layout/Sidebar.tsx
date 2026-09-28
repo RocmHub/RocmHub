@@ -1,6 +1,35 @@
 import React from 'react';
-import {Home,Search,Activity,Gauge,Github} from 'lucide-react';
-export type NavTab='dashboard'|'explorer'|'runs'|'forge'|'engineer'|'optimization';
-interface SidebarProps{activeTab:NavTab;onTabChange:(tab:NavTab)=>void;isOpenMobile?:boolean;onCloseMobile?:()=>void}
-const ITEMS=[{id:'dashboard' as NavTab,label:'Home',icon:Home},{id:'explorer' as NavTab,label:'Models',icon:Search},{id:'runs' as NavTab,label:'Runs',icon:Activity},{id:'optimization' as NavTab,label:'Optimize',icon:Gauge}];
-export const Sidebar:React.FC<SidebarProps>=({activeTab,onTabChange,isOpenMobile=false,onCloseMobile})=>{const selectedTab=activeTab==='forge'||activeTab==='engineer'?'runs':activeTab;const nav=<div className="w-[214px] h-full bg-[#09090b] border-r hairline flex flex-col p-3"><nav aria-label="Primary navigation" className="flex-1 space-y-1 pt-2">{ITEMS.map(({id,label,icon:Icon})=><button key={id} aria-current={selectedTab===id?'page':undefined} onClick={()=>{onTabChange(id);onCloseMobile?.()}} className={`w-full h-11 px-3 rounded-xl flex items-center gap-3 text-sm transition-all ${selectedTab===id?'bg-white/[.08] text-white':'text-zinc-500 hover:text-zinc-200 hover:bg-white/[.035]'}`}><Icon size={18} strokeWidth={1.8}/><span className="font-medium">{label}</span>{selectedTab===id&&<span className="ml-auto w-1.5 h-1.5 rounded-full bg-red-500"/>}</button>)}</nav><div className="p-3 border-t hairline"><div className="flex items-center gap-2 text-[11px] text-zinc-600"><Github size={14}/><span>Open infrastructure</span></div></div></div>;return <><aside className="hidden md:flex h-full">{nav}</aside>{isOpenMobile&&<div className="fixed inset-0 z-50 md:hidden flex"><button aria-label="Close navigation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onCloseMobile}/><div className="relative h-full">{nav}</div></div>}</>}
+import { Activity, Gauge, Github, Home, Search } from 'lucide-react';
+
+export type NavTab = 'dashboard' | 'explorer' | 'runs' | 'forge' | 'engineer' | 'optimization';
+interface SidebarProps {
+  activeTab: NavTab;
+  onTabChange: (tab: NavTab) => void;
+  isOpenMobile?: boolean;
+  onCloseMobile?: () => void;
+}
+
+const ITEMS = [
+  { id: 'dashboard' as NavTab, label: 'Home', icon: Home },
+  { id: 'explorer' as NavTab, label: 'Models', icon: Search },
+  { id: 'runs' as NavTab, label: 'Runs', icon: Activity },
+  { id: 'optimization' as NavTab, label: 'Optimize', icon: Gauge },
+];
+
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isOpenMobile = false, onCloseMobile }) => {
+  const selectedTab = activeTab === 'forge' || activeTab === 'engineer' ? 'runs' : activeTab;
+  const nav = <div className="workspace-sidebar">
+    <div className="sidebar-caption">Workspace</div>
+    <nav aria-label="Primary navigation" className="flex-1 space-y-1">
+      {ITEMS.map(({ id, label, icon: Icon }) => <button
+        key={id}
+        aria-current={selectedTab === id ? 'page' : undefined}
+        onClick={() => { onTabChange(id); onCloseMobile?.(); }}
+        className={`sidebar-link ${selectedTab === id ? 'sidebar-link-active' : ''}`}
+      ><Icon size={17} strokeWidth={1.8}/><span>{label}</span>{selectedTab === id && <span className="sidebar-active-mark"/>}</button>)}
+    </nav>
+    <div className="sidebar-footer"><div className="sidebar-footer-mark"><Github size={15}/></div><div><div className="text-xs font-medium text-zinc-300">Open infrastructure</div><div className="text-[10px] text-zinc-600 mt-1">Built for AMD compute</div></div></div>
+  </div>;
+
+  return <><aside className="hidden md:flex h-full">{nav}</aside>{isOpenMobile && <div className="fixed inset-0 z-50 md:hidden flex"><button aria-label="Close navigation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onCloseMobile}/><div className="relative h-full">{nav}</div></div>}</>;
+};

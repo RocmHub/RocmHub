@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ArrowRight, Clock3, RotateCcw } from 'lucide-react';
 import type { JobListResponse } from '../../api/types';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +17,8 @@ interface Props {
 
 export const RunsView: React.FC<Props> = ({ jobsList, isLoading, isError = false, selectedJobId, onRetry, onOpenJob }) => {
   const jobs = jobsList?.items ?? [];
+  const [filter, setFilter] = useState<'all' | 'active' | 'complete' | 'attention'>('all');
+  const visibleJobs = jobs.filter((job) => filter === 'all' || (filter === 'active' ? job.status === 'QUEUED' || job.status === 'RUNNING' : filter === 'complete' ? job.status === 'SUCCEEDED' : job.status === 'FAILED' || job.status === 'CANCELLED'));
   const selectedFromList = selectedJobId ? jobs.find((job) => job.job_id === selectedJobId) : null;
   const selectedQuery = useQuery({ queryKey: ['job', selectedJobId], queryFn: () => fetchJob(selectedJobId as string), enabled: Boolean(selectedJobId && !selectedFromList), retry: false });
   const selectedJob = selectedFromList ?? selectedQuery.data ?? null;
@@ -25,7 +27,7 @@ export const RunsView: React.FC<Props> = ({ jobsList, isLoading, isError = false
     <header className="max-w-3xl">
       <div className="eyebrow mb-3">Workspace</div>
       <h1 className="page-title">Runs</h1>
-      <p className="lede mt-4">Track model preparation, optimization studies, and future AMD runs in one place.</p>
+      <p className="lede mt-4">Every preparation and study, with clear outcomes and a path back to its result.</p>
     </header>
 
     {selectedJobId && <section className="focus-panel mt-8 p-5 md:p-7" aria-live="polite">
@@ -50,11 +52,14 @@ export const RunsView: React.FC<Props> = ({ jobsList, isLoading, isError = false
     </section>}
 
     <section className="mt-9" aria-label="Recent runs">
-      <div className="flex items-end justify-between gap-4 mb-4"><div><h2 className="text-lg font-semibold">Recent runs</h2><p className="text-sm text-zinc-500 mt-1">The latest operations in this workspace.</p></div>{jobsList && jobsList.total > 0 && <span className="text-xs text-zinc-600">{jobsList.total} total</span>}</div>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-4"><div><div className="eyebrow mb-2">Activity</div><h2 className="text-xl font-semibold">Recent runs</h2><p className="text-sm text-zinc-500 mt-1">The latest work in this workspace.</p></div>{jobsList && jobsList.total > 0 && <span className="text-xs text-zinc-600">{jobsList.total} runs</span>}</div>
+      {jobsList && jobsList.total > jobs.length && <p className="text-xs text-zinc-600 -mt-2 mb-4">Showing the latest {jobs.length} of {jobsList.total} runs. Filters apply to this list.</p>}
+      {!isLoading && !isError && jobs.length > 0 && <div className="run-filters" role="group" aria-label="Filter runs">{([['all','All runs'],['active','In progress'],['complete','Completed'],['attention','Needs attention']] as const).map(([id,label])=><button key={id} aria-pressed={filter===id} onClick={()=>setFilter(id)} className={`run-filter ${filter===id?'run-filter-active':''}`}>{label}<span>{jobs.filter((job)=>id==='all'?true:id==='active'?job.status==='QUEUED'||job.status==='RUNNING':id==='complete'?job.status==='SUCCEEDED':job.status==='FAILED'||job.status==='CANCELLED').length}</span></button>)}</div>}
       {isLoading ? <div aria-label="Loading runs" className="space-y-3">{[0,1,2].map((item) => <div key={item} className="h-24 rounded-2xl shimmer" />)}</div>
         : isError ? <div className="focus-panel p-6"><h3 className="font-semibold">Runs couldn’t be loaded</h3><p className="text-sm text-zinc-500 mt-1">Your work is unchanged. Try loading the list again.</p><button className="btn-secondary mt-4" onClick={onRetry}><RotateCcw size={14}/>Retry</button></div>
-        : jobs.length === 0 ? <div className="focus-panel p-7 md:p-9"><h3 className="text-lg font-semibold">No runs yet</h3><p className="text-sm text-zinc-500 mt-2">Your model preparation, optimization studies, and future AMD runs will appear here.</p><button className="btn-ghost mt-4" onClick={() => onOpenJob('', 'explorer')}>Browse models <ArrowRight size={14}/></button></div>
-        : <div className="space-y-2">{jobs.map((job) => <article key={job.job_id} className="card-interactive p-4 md:p-5">
+        : jobs.length === 0 ? <div className="empty-panel"><div className="empty-icon"><Clock3 size={19}/></div><h3 className="text-lg font-semibold mt-4">No runs yet</h3><p className="text-sm text-zinc-400 mt-2">Model preparation and optimization studies will appear here, followed by future AMD execution runs.</p><button className="btn-secondary mt-5" onClick={() => onOpenJob('', 'explorer')}>Explore models <ArrowRight size={14}/></button></div>
+        : visibleJobs.length === 0 ? <div className="empty-panel"><h3 className="font-semibold">No {filter === 'active' ? 'work in progress' : filter === 'complete' ? 'completed runs' : 'runs need attention'}</h3><p className="text-sm text-zinc-500 mt-2">Choose another filter to see the rest of your workspace activity.</p></div>
+        : <div className="space-y-2">{visibleJobs.map((job) => <article key={job.job_id} className="card-interactive p-4 md:p-5">
           <button onClick={() => onOpenJob(job.job_id, tabForJobType(job.job_type))} className="w-full text-left flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="text-xs text-zinc-400">{JOB_TYPE_COPY[job.job_type]}</span><span className="text-xs text-zinc-500">{JOB_STATUS_COPY[job.status]}</span></div><div className="font-medium mt-2 truncate">{job.model_id}</div></div>
             <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 sm:justify-end">{job.domain_status && <span>{DOMAIN_STATUS_COPY[job.domain_status].label}</span>}<span className="flex items-center gap-1.5"><Clock3 size={12}/>{new Date(job.created_at).toLocaleDateString()}</span><ArrowRight size={14} className="text-zinc-600"/></div>

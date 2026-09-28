@@ -127,6 +127,8 @@ export const App: React.FC = () => {
             {activeTab === 'dashboard' && (
               <DashboardView
                 health={health ?? null}
+                isLoadingHealth={isLoadingHealth}
+                isHealthError={isHealthError}
                 jobsList={jobsList ?? null}
                 isLoadingJobs={isLoadingJobs}
                 isJobsError={isJobsError}

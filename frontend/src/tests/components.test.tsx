@@ -113,9 +113,9 @@ describe('Common Components', () => {
     );
 
     // One obvious product action and truthful environment context
-    expect(screen.getByRole('button', { name: /Find a model/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Explore models' })).toBeInTheDocument();
     expect(screen.getAllByText('No compute connected')).toHaveLength(2);
-    expect(screen.getByText(/You can search and inspect models without compute/)).toBeInTheDocument();
+    expect(screen.getByText(/Find and inspect public models without compute/)).toBeInTheDocument();
     expect(screen.queryByText(/ROCm host/)).not.toBeInTheDocument();
 
     // Recent work is presented as a continuation card, not an admin table
@@ -126,8 +126,8 @@ describe('Common Components', () => {
   it('keeps an empty Home state useful without duplicating the hero action', () => {
     render(<DashboardView health={null} jobsList={{ items: [], total: 0, limit: 20, offset: 0 }} isLoadingJobs={false} onNavigate={vi.fn()} onSelectJob={vi.fn()} />);
     expect(screen.getByText('No runs yet')).toBeInTheDocument();
-    expect(screen.getAllByText(/model preparation, optimization studies, and future AMD runs/).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: /Find a model/ })).toHaveLength(1);
+    expect(screen.getAllByText(/Model preparation and optimization studies will appear here/).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Explore models' })).toHaveLength(1);
   });
 
   it('labels the service independently from compute and keeps runtime facts in technical details', () => {
@@ -155,7 +155,7 @@ describe('Common Components', () => {
     expect(screen.getByLabelText('Advanced revision')).toHaveValue('main');
     expect(screen.queryByText('Production class')).not.toBeInTheDocument();
     expect(screen.getByText('Larger instruction model')).toBeInTheDocument();
-    expect(screen.getByText('Inspect any public Hugging Face model and prepare it for AMD hardware.')).toBeInTheDocument();
+    expect(screen.getByText('Inspect any public Hugging Face model, then choose the preparation path that fits your needs.')).toBeInTheDocument();
   });
 
   it('explains that Optimize currently prepares configuration comparisons, even when AMD is detected', () => {
@@ -207,11 +207,30 @@ describe('Common Components', () => {
     expect(screen.getByLabelText('Loading runs')).toBeInTheDocument();
     rerender(<QueryClientProvider client={queryClient}><RunsView jobsList={{ items: [], total: 0, limit: 100, offset: 0 }} isLoading={false} onOpenJob={vi.fn()} /></QueryClientProvider>);
     expect(screen.getByText('No runs yet')).toBeInTheDocument();
-    expect(screen.getAllByText(/model preparation, optimization studies, and future AMD runs/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Model preparation and optimization studies will appear here/).length).toBeGreaterThan(0);
     expect(screen.queryByText('0 total')).not.toBeInTheDocument();
     rerender(<QueryClientProvider client={queryClient}><RunsView jobsList={null} isLoading={false} isError onRetry={onRetry} onOpenJob={vi.fn()} /></QueryClientProvider>);
     expect(screen.getByText('Runs couldn’t be loaded')).toBeInTheDocument();
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('filters Runs locally by activity outcome', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const makeJob = (job_id: string, status: 'SUCCEEDED' | 'FAILED'): JobListResponse['items'][number] => ({
+      job_id, job_type: 'PREPARE_MODEL_FOR_AMD', model_id: `org/${job_id}`, revision: 'main', status,
+      domain_status: status === 'SUCCEEDED' ? 'CONFIG_ONLY' : null, created_at: '2026-09-22T08:00:00Z',
+      started_at: null, completed_at: null, timeout_seconds: 600, output_dir: null, error_message: null, error_code: null,
+    });
+    const jobsList: JobListResponse = { items: [makeJob('success-run', 'SUCCEEDED'), makeJob('failed-run', 'FAILED')], total: 2, limit: 100, offset: 0 };
+    render(<QueryClientProvider client={queryClient}><RunsView jobsList={jobsList} isLoading={false} onOpenJob={vi.fn()} /></QueryClientProvider>);
+    expect(screen.getByText('org/success-run')).toBeInTheDocument();
+    expect(screen.getByText('org/failed-run')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /Completed/ })[0]);
+    expect(screen.getByText('org/success-run')).toBeInTheDocument();
+    expect(screen.queryByText('org/failed-run')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention/ }));
+    expect(screen.getByText('org/failed-run')).toBeInTheDocument();
+    expect(screen.queryByText('org/success-run')).not.toBeInTheDocument();
   });
 
   it('counts only accurately labeled Agent states', () => {

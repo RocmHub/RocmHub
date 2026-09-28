@@ -12,7 +12,7 @@ import {
   Play, XCircle, CheckCircle2, BarChart3, Info, Check, ChevronDown,
 } from 'lucide-react';
 
-import optimizationLabHeroImg from '../../assets/visuals/optimization_lab_hero.svg';
+import optimizationLabHeroImg from '../../assets/visuals/rocmhub-optimize-hero.jpg';
 
 interface OptimizationLabViewProps {
   selectedJobId?: string | null;
@@ -197,30 +197,31 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   const failed = jobResult?.job_status === 'FAILED' || jobResult?.domain_status === 'FAILED' || jobResult?.result?.status === 'FAILED' || activeJob?.status === 'FAILED' || activeJob?.domain_status === 'FAILED';
   const cancelled = jobResult?.job_status === 'CANCELLED' || activeJob?.status === 'CANCELLED';
   const failureDetail = jobResult?.error_message || launchError || 'The experiment stopped before baseline and candidate preparation completed.';
+  const baselineMeasured = Boolean(jobResult?.result?.baseline?.measured && (jobResult.result.baseline.benchmark_result?.throughput_tokens_per_sec != null || jobResult.result.baseline.benchmark_result?.ttft_ms != null));
+  const hasMeasuredCandidate = Boolean(baselineMeasured && Array.isArray(jobResult?.result?.candidates) && jobResult.result.candidates.some((candidate: any) => candidate.measured && (candidate.benchmark_result?.throughput_tokens_per_sec != null || candidate.benchmark_result?.ttft_ms != null)));
+  const activityTitle = activeJob?.status === 'QUEUED' ? 'Waiting for a worker' : 'Study in progress';
 
   return (
     <div className="page-fade">
       {/* ── HERO ─────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden border-b hairline min-h-[260px] flex items-center">
-        <div className="absolute inset-0 flex items-center justify-end pr-16 opacity-20 pointer-events-none">
-          <img src={optimizationLabHeroImg} alt="" className="h-40 opacity-80" />
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-r from-[#09090b] via-[#09090b]/95 to-transparent" />
-        <div className="relative z-10 page-shell py-12">
-          <p className="eyebrow mb-5">Experiment workspace</p>
-          <h1 className="page-title">Compare strategies.<br/><span className="text-zinc-500">Keep the evidence.</span></h1>
-          <p className="text-base text-zinc-500 mt-5 max-w-xl">Design a fair baseline and candidate study before moving it onto AMD hardware.</p>
+      <div className="relative overflow-hidden border-b hairline min-h-[350px] flex items-center">
+        <img src={optimizationLabHeroImg} alt="Two abstract configuration paths meeting for comparison" className="hero-image absolute inset-0 w-full h-full object-cover object-center" />
+        <div className="hero-overlay absolute inset-0" />
+        <div className="relative z-10 page-shell py-14 md:py-16 w-full">
+          <p className="eyebrow mb-5">Optimization workspace</p>
+          <h1 className="page-title">Compare setup choices.<br/><span className="text-zinc-400">Measurements come later.</span></h1>
+          <p className="lede mt-5 max-w-2xl">Prepare a baseline and candidate configurations for review. This workspace does not currently run inference or collect performance measurements.</p>
         </div>
       </div>
 
       <div className="page-shell py-10 space-y-6">
         {/* ── WORKSPACE SETUP ─────────────────────────────────────── */}
-        <div className="focus-panel p-6 md:p-8 space-y-7">
+          <div className="focus-panel p-5 md:p-8 space-y-7">
           <div role="note" aria-label="Hardware measurement availability" className="rounded-xl border border-amber-500/20 bg-amber-500/[.05] p-4 md:p-5">
             <div className="text-sm font-semibold text-amber-200">Comparison preparation only</div>
             <p className="text-sm text-zinc-400 mt-1 leading-relaxed">{capabilityMessage}</p>
           </div>
-          <div><div className="eyebrow mb-3">Study design</div><h2 className="text-2xl font-semibold tracking-[-.03em]">Baseline versus candidates</h2></div>
+          <div><div className="eyebrow mb-2">Study design</div><h2 className="text-2xl font-semibold tracking-[-.04em]">Define your comparison</h2><p className="text-sm text-zinc-500 mt-2">Choose a reference goal and one or more candidate precisions.</p></div>
 
           {/* Model + Objective row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -235,7 +236,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-content-muted">Optimization Goal</label>
+              <label className="text-xs font-medium text-content-muted">Comparison goal</label>
               <div className="grid grid-cols-3 gap-2">
                 {OBJECTIVES.map((obj) => {
                   const isSelected = objective === obj.id;
@@ -247,7 +248,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                       title={obj.desc}
                       className={`py-2 px-2 rounded-lg border text-[11px] font-medium transition-all ${
                         isSelected
-                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                          ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
                           : 'bg-surface-elevated border-surface-border text-content-secondary hover:border-zinc-600'
                       }`}
                     >
@@ -261,7 +262,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
           {/* Strategies */}
           <div className="space-y-2 pt-2 border-t border-surface-border">
-            <label className="text-xs font-medium text-content-muted">Compare Strategies</label>
+            <label className="text-xs font-medium text-content-muted">Candidate precisions</label>
             <div className="grid sm:grid-cols-3 gap-3">
               {STRATEGIES.map((st) => {
                 const isSelected = strategies.includes(st.id);
@@ -273,11 +274,11 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                     title={st.desc}
                     className={`min-h-[130px] flex flex-col items-start justify-between gap-4 p-5 rounded-2xl border text-sm font-medium transition-all ${
                       isSelected
-                        ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                        ? 'bg-red-500/[.08] border-red-500/35 text-red-200'
                         : 'bg-surface-elevated border-surface-border text-content-secondary hover:border-zinc-600 hover:text-content-primary'
                     }`}
                   >
-                    {isSelected && <Check className="w-3 h-3 text-emerald-400" />}
+                    {isSelected && <Check className="w-3 h-3 text-red-300" />}
                     {st.label}
                     <span className="text-[10px] text-content-muted">{st.desc.split('·')[0].trim()}</span>
                   </button>
@@ -331,9 +332,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
             <details><summary className="text-[11px] text-content-muted cursor-pointer">Technical details</summary><p className="mt-2 font-mono text-[10px] text-content-muted break-all">Run ID: {activeJob.job_id}</p></details>
 
             {isRunning && (
-              <div className="grid md:grid-cols-3 gap-3" aria-label="Experiment activity">
-                {[{name:'Baseline',strategy:'FP16'},...strategies.slice(0,2).map((strategy,index)=>({name:`Candidate ${String.fromCharCode(65+index)}`,strategy:strategy.toUpperCase()}))].map((lane,index)=><div key={lane.name} className="p-5 rounded-2xl bg-white/[.025] border hairline"><div className="flex items-center justify-between"><span className="text-sm font-semibold">{lane.name}</span><span className="font-mono text-[10px] text-zinc-500">{lane.strategy}</span></div><div className="flex items-center gap-2 mt-7 text-[11px] text-zinc-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80 animate-pulse"/>{index===0?'Preparing reference':'Preparing candidate'}</div><div className="text-[11px] text-zinc-600 mt-2">Waiting for result</div></div>)}
-              </div>
+              <div className="run-activity" aria-label="Experiment activity" role="status"><span className="status-dot status-dot-pending"/><div><div className="text-sm font-medium">{activityTitle}</div><p className="text-xs text-zinc-500 mt-1">{jobEvents.length ? 'Latest update from the worker:' : activeJob.status === 'QUEUED' ? 'Queued. Waiting for a worker to claim this study.' : 'Worker accepted the study. Waiting for the first status update.'}</p>{jobEvents.length > 0 && <p className="text-sm text-zinc-300 mt-2">{jobEvents[jobEvents.length - 1].message}</p>}</div></div>
             )}
 
             {/* Collapsed log */}
@@ -358,8 +357,10 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                       : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                     <span className={`text-sm font-semibold ${jobResult.job_status === 'FAILED' ? 'text-amber-300' : 'text-emerald-400'}`}>
                       {jobResult.job_status === 'FAILED'
-                        ? 'The optimization study could not complete'
-                        : `Optimization study completed${jobResult.domain_status ? ` · ${DOMAIN_STATUS_COPY[jobResult.domain_status].label}` : ''}`}
+                        ? 'The comparison could not complete'
+                        : hasMeasuredCandidate
+                          ? `Comparison complete${jobResult.domain_status ? ` · ${DOMAIN_STATUS_COPY[jobResult.domain_status].label}` : ''}`
+                          : 'Comparison configurations prepared · Performance not measured'}
                     </span>
                   </div>
                 </div>
@@ -373,9 +374,8 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-elevated border border-surface-border text-xs">
                   <Info className="w-4 h-4 text-content-muted shrink-0 mt-0.5" />
                   <p className="text-content-secondary leading-relaxed">
-                    On hosts without a physical AMD GPU, throughput and latency are reported as{' '}
-                    <span className="font-semibold text-amber-400">not measured</span>.
-                    Real hardware benchmarks require a ROCm-capable GPU.
+                    This comparison prepares configurations only; it did not run inference or collect hardware performance. Throughput and latency remain{' '}
+                    <span className="font-semibold text-amber-400">not measured</span> until an eligible AMD execution is recorded.
                   </p>
                 </div>
 
@@ -383,8 +383,8 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-content-muted" />
-                    <h4 className="text-sm font-semibold text-content-primary">Candidate Comparison Table</h4>
-                    {jobResult.result?.best_candidate_id && (
+                    <h4 className="text-sm font-semibold text-content-primary">Baseline and candidates</h4>
+                    {hasMeasuredCandidate && jobResult.result?.best_candidate_id && (
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[11px] font-mono border border-emerald-500/25">
                         Best: {jobResult.result.best_candidate_id}
                       </span>

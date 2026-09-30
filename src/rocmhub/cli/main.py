@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, List, Optional
@@ -704,6 +705,16 @@ def build_parser() -> argparse.ArgumentParser:
     agent_start.add_argument("--poll-interval", type=float, default=float(os.environ.get("ROCMHUB_AGENT_POLL_INTERVAL", "2")))
     agent_start.add_argument("--max-concurrent-jobs", type=int, default=int(os.environ.get("ROCMHUB_AGENT_MAX_CONCURRENT_JOBS", "1")))
     agent_start.add_argument("--json", action="store_true", help="Emit status records as JSON; never includes the token.")
+
+    maintenance_parser = subparsers.add_parser("maintenance", help="Run bounded ROCmHub data maintenance.")
+    maintenance_subparsers = maintenance_parser.add_subparsers(dest="maintenance_action")
+    clean_data = maintenance_subparsers.add_parser(
+        "clean-development-data",
+        help="Inspect and remove only stale Agent presence and clearly marked pre-public test jobs.",
+    )
+    cleanup_mode = clean_data.add_mutually_exclusive_group()
+    cleanup_mode.add_argument("--dry-run", action="store_true", help="Report the bounded cleanup plan (default).")
+    cleanup_mode.add_argument("--confirm", action="store_true", help="Back up the configured SQLite DB and execute the cleanup.")
     serve_parser.add_argument(
         "--port",
         type=int,
@@ -1978,6 +1989,82 @@ def main(args: Optional[List[str]] = None) -> int:
         except Exception as exc:
             sys.stderr.write(f"Agent error: {exc}\n")
             return 1
+
+    if parsed_args.command == "maintenance":
+        if parsed_args.maintenance_action != "clean-development-data":
+            sys.stderr.write("Error: maintenance subcommand required; use 'rocmhub maintenance clean-development-data --dry-run'.\n")
+            return 1
+        if not os.environ.get("ROCMHUB_DATA_DIR"):
+            sys.stderr.write("Error: set ROCMHUB_DATA_DIR explicitly; maintenance will not guess a database or artifact directory.\n")
+            return 1
+        try:
+            from rocmhub.server.config import ServerConfig
+            from rocmhub.server.maintenance import (
+                MaintenanceSafetyError,
+                execute_development_cleanup,
+                inspect_development_data,
+            )
+
+            config = ServerConfig()
+            cleanup_plan = inspect_development_data(
+                config.db_path,
+                config.data_dir,
+                config.artifact_storage_dir,
+                config.agent_retention_seconds,
+            )
+            sys.stdout.write(f"Database: {cleanup_plan.database_path}\nData directory: {cleanup_plan.data_dir}\n")
+            sys.stdout.write(f"Stale Agent records to remove: {len(cleanup_plan.agent_ids)}\n")
+            sys.stdout.write(f"Development/test jobs to remove: {len(cleanup_plan.job_ids)}\n")
+            sys.stdout.write("Jobs by type: " + (", ".join(f"{key}={value}" for key, value in sorted(cleanup_plan.jobs_by_type.items())) or "none") + "\n")
+            sys.stdout.write(
+                f"Associated events: {cleanup_plan.event_count}; results: {cleanup_plan.result_count}; "
+                f"artifact records: {cleanup_plan.artifact_record_count}; artifact files: {cleanup_plan.artifact_file_count}\n"
+            )
+            if cleanup_plan.physical_execution_job_ids:
+                sys.stderr.write(
+                    "STOP: physical AMD execution evidence was found in job record(s): "
+                    + ", ".join(cleanup_plan.physical_execution_job_ids)
+                    + ". No cleanup was performed.\n"
+                )
+                return 2
+            if cleanup_plan.ambiguous_job_count or cleanup_plan.ambiguous_agent_count:
+                sys.stderr.write(
+                    "STOP: some records cannot be safely classified; no cleanup was performed. "
+                    f"Ambiguous Agents={cleanup_plan.ambiguous_agent_count}, jobs={cleanup_plan.ambiguous_job_count}.\n"
+                )
+                return 2
+            if cleanup_plan.in_progress_job_count or cleanup_plan.protected_agent_count:
+                sys.stderr.write(
+                    "STOP: active job ownership may be affected; no cleanup was performed. "
+                    f"Running jobs={cleanup_plan.in_progress_job_count}, protected Agents={cleanup_plan.protected_agent_count}.\n"
+                )
+                return 2
+            if cleanup_plan.unsafe_artifact_job_ids:
+                sys.stderr.write(
+                    "STOP: artifact paths were not safe to resolve for job(s): "
+                    + ", ".join(cleanup_plan.unsafe_artifact_job_ids)
+                    + ". No cleanup was performed.\n"
+                )
+                return 2
+
+            if not parsed_args.confirm:
+                sys.stdout.write("Mode: DRY RUN (no database or artifact data changed).\n")
+                return 0
+
+            backup_path = execute_development_cleanup(cleanup_plan, config.agent_retention_seconds)
+            sys.stdout.write(f"Database backup created: {backup_path}\n")
+            sys.stdout.write(
+                f"Cleanup complete: Agents={len(cleanup_plan.agent_ids)}, jobs={len(cleanup_plan.job_ids)}, "
+                f"events={cleanup_plan.event_count}, results={cleanup_plan.result_count}, "
+                f"artifact records={cleanup_plan.artifact_record_count}, files={cleanup_plan.artifact_file_count}.\n"
+            )
+            return 0
+        except (MaintenanceSafetyError, OSError, sqlite3.Error) as exc:
+            sys.stderr.write(f"Maintenance stopped safely: {exc}\n")
+            return 2
+        except Exception as exc:
+            sys.stderr.write(f"Maintenance failed safely: {type(exc).__name__}.\n")
+            return 2
 
     elif parsed_args.command == "optimize":
         model_id = parsed_args.model_id or parsed_args.model_opt

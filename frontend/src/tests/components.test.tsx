@@ -78,7 +78,7 @@ describe('Common Components', () => {
       rocm_available: false,
       host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true },
       system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] },
-      orchestrator: { queue_size: 0, active_directory_locks: [] },
+      orchestrator: { queue_size: 0, active_directory_lock_count: 0 },
       warnings: ['Running on macOS without AMD ROCm GPU.'],
     };
 
@@ -95,7 +95,6 @@ describe('Common Components', () => {
           started_at: '2026-09-22T08:00:01Z',
           completed_at: '2026-09-22T08:00:05Z',
           timeout_seconds: 600,
-          output_dir: '/tmp/test',
           error_message: null,
           error_code: null,
         },
@@ -142,13 +141,13 @@ describe('Common Components', () => {
       status: 'healthy', version: '0.1.0', rocm_available: false,
       host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true },
       system: { os: 'darwin', python_version: '3.9.6', rocm_version: '6.2', torch_version: '2.2.0', gpus_detected: 0, gpus: [] },
-      orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [],
+      orchestrator: { queue_size: 0, active_directory_lock_count: 0 }, warnings: [],
     };
     render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} />);
     expect(screen.queryByRole('combobox', { name: 'Color theme' })).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
+    expect(screen.getByRole('button', { name: 'No AMD compute connected' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute connected' }));
     expect(screen.getByText(/No AMD runtime detected here/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Service details'));
     expect(screen.getByText(/ROCm 6.2/)).toBeInTheDocument();
@@ -283,7 +282,7 @@ describe('Common Components', () => {
     const makeJob = (job_id: string, status: 'SUCCEEDED' | 'FAILED'): JobListResponse['items'][number] => ({
       job_id, job_type: 'PREPARE_MODEL_FOR_AMD', model_id: `org/${job_id}`, revision: 'main', status,
       domain_status: status === 'SUCCEEDED' ? 'CONFIG_ONLY' : null, created_at: '2026-09-22T08:00:00Z',
-      started_at: null, completed_at: null, timeout_seconds: 600, output_dir: null, error_message: null, error_code: null,
+      started_at: null, completed_at: null, timeout_seconds: 600, error_message: null, error_code: null,
     });
     const jobsList: JobListResponse = { items: [makeJob('success-run', 'SUCCEEDED'), makeJob('failed-run', 'FAILED')], total: 2, limit: 100, offset: 0 };
     render(<QueryClientProvider client={queryClient}><RunsView jobsList={jobsList} isLoading={false} onOpenJob={vi.fn()} /></QueryClientProvider>);
@@ -301,9 +300,9 @@ describe('Common Components', () => {
     const job: JobListResponse['items'][number] = {
       job_id: 'prepared-run', job_type: 'PREPARE_MODEL_FOR_AMD', model_id: 'Qwen/Qwen2.5-0.5B-Instruct', revision: 'main',
       status: 'SUCCEEDED', domain_status: 'PREPARED', created_at: '2026-09-22T08:00:00Z', started_at: '2026-09-22T08:01:00Z',
-      completed_at: '2026-09-22T08:02:00Z', timeout_seconds: 600, output_dir: '/tmp/prepared-run', error_message: null, error_code: null,
+      completed_at: '2026-09-22T08:02:00Z', timeout_seconds: 600, error_message: null, error_code: null,
     };
-    const resultSpy = vi.spyOn(apiClient, 'fetchJobResult').mockResolvedValue({ job_id: job.job_id, job_type: job.job_type, job_status: 'SUCCEEDED', domain_status: 'PREPARED', output_dir: job.output_dir, completed_at: job.completed_at, result: { materialization: { cache_status: 'verified' } }, error_message: null });
+    const resultSpy = vi.spyOn(apiClient, 'fetchJobResult').mockResolvedValue({ job_id: job.job_id, job_type: job.job_type, job_status: 'SUCCEEDED', domain_status: 'PREPARED', completed_at: job.completed_at, result: { materialization: { cache_status: 'verified' } }, error_message: null });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><RunsView jobsList={{ items: [job], total: 1, limit: 100, offset: 0 }} isLoading={false} selectedJobId={job.job_id} onOpenJob={vi.fn()} /></QueryClientProvider>);
     expect(await screen.findByText('Run timeline')).toBeInTheDocument();
@@ -314,23 +313,30 @@ describe('Common Components', () => {
     resultSpy.mockRestore();
   });
 
-  it('counts only accurately labeled Agent states', () => {
+  it('summarizes only current Agent presence', () => {
     expect(agentSummary([
-      { agent_id: '1', name: 'Online', hostname: 'one', status: 'ONLINE', last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD'], capabilities: [] } },
-      { agent_id: '2', name: 'Busy', hostname: 'two', status: 'BUSY', last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: false, hip_detected: false, amd_gpu_count: 0, gpu_names: [], capabilities: [] } },
-      { agent_id: '3', name: 'Offline', hostname: 'three', status: 'OFFLINE', last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: false, hip_detected: false, amd_gpu_count: 0, gpu_names: [], capabilities: [] } },
-    ])).toBe('1 connected · 1 working · 1 not connected · 0 interrupted');
+      { label: 'AMD GPU', status: 'ONLINE', has_amd_gpu: true, gpu_names: ['AMD GPU'], rocm_detected: true },
+      { label: 'Preparation Agent', status: 'BUSY', has_amd_gpu: false, gpu_names: [], rocm_detected: false },
+    ])).toBe('1 online · 1 working');
   });
 
-  it('never presents offline agents as connected in the compute panel', () => {
-    const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [] };
-    const offline = [{ agent_id: 'offline', name: 'Offline', hostname: 'laptop', status: 'OFFLINE' as const, last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD GPU'], capabilities: ['PREPARE_MODEL_FOR_AMD'] } }];
-    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} agents={offline} />);
-    expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
-    expect(screen.getByText('AMD GPU')).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
-    expect(screen.queryByText('AMD compute available')).not.toBeInTheDocument();
+  it('shows only current compute and does not surface machine identity', () => {
+    const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_lock_count: 0 }, warnings: [] };
+    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} agents={[]} />);
+    expect(screen.getByRole('button', { name: 'No AMD compute connected' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute connected' }));
+    expect(screen.getByText('No AMD compute connected.')).toBeInTheDocument();
+    expect(screen.queryByText('mac-dev-agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('laptop')).not.toBeInTheDocument();
+  });
+
+  it('labels a live preparation-only Agent without inventing an AMD GPU', () => {
+    const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_lock_count: 0 }, warnings: [] };
+    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} agents={[{ label: 'Preparation Agent', status: 'ONLINE', has_amd_gpu: false, gpu_names: [], rocm_detected: false }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'No AMD compute connected' }));
+    expect(screen.getByText('Preparation Agent')).toBeInTheDocument();
+    expect(screen.getByText('Online · AMD GPU not reported')).toBeInTheDocument();
+    expect(screen.queryByText('AMD compute reported')).not.toBeInTheDocument();
   });
 
   it('labels compute status as unavailable when the service cannot be reached', () => {

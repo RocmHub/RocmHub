@@ -17,9 +17,11 @@ from rocmhub.server.orchestrator.models import (
     AgentCompleteRequest,
     AgentEventRequest,
     AgentFailRequest,
+    AgentPresenceResponse,
     AgentRegisterRequest,
     AgentResponse,
 )
+from rocmhub.server.privacy import sanitize_public_value
 
 router = APIRouter(prefix="/api/v1/agents", tags=["Agents"])
 
@@ -35,6 +37,20 @@ _ALLOWED_ARTIFACT_FILES = {
 _PRIVATE_PATH_PATTERN = re.compile(
     r"(?<!:)/(?:Users|home|root|private|tmp|var|Volumes|mnt|opt|usr|etc|srv|app|workspace|agent-workspace)/"
 )
+
+
+def _sanitize_artifact_content(name: str, content: str) -> str:
+    """Keep downloaded Agent artifacts useful without publishing local identity or paths."""
+    if name.endswith(".json"):
+        try:
+            parsed = json.loads(content)
+        except ValueError:
+            pass
+        else:
+            sanitized = sanitize_public_value(parsed, preserve_null_path_fields=True)
+            if sanitized != parsed:
+                return json.dumps(sanitized, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    return str(sanitize_public_value(content))
 
 
 def _contains_agent_local_path(value: object) -> bool:
@@ -65,6 +81,39 @@ def _store_agent_artifacts(
     if len(artifact_files) > len(_ALLOWED_ARTIFACT_FILES):
         raise ValueError("Too many Agent artifacts")
 
+    sanitized_files: dict[str, str] = {}
+    for name, content in artifact_files.items():
+        if name not in _ALLOWED_ARTIFACT_FILES or Path(name).name != name:
+            raise ValueError("Unsupported Agent artifact name")
+        sanitized_files[name] = _sanitize_artifact_content(name, content)
+
+    for manifest_name, digest_map in (("build_manifest.json", "artifacts"), ("checksums.json", "files")):
+        manifest_content = sanitized_files.get(manifest_name)
+        if manifest_content is None:
+            continue
+        try:
+            manifest = json.loads(manifest_content)
+        except ValueError:
+            continue
+        hashes = manifest.get(digest_map) if isinstance(manifest, dict) else None
+        if not isinstance(hashes, dict):
+            continue
+        changed = False
+        updated_hashes = dict(hashes)
+        for artifact_name, current_hash in updated_hashes.items():
+            artifact_content = sanitized_files.get(str(artifact_name))
+            if artifact_content is None or artifact_name == manifest_name or not isinstance(current_hash, str):
+                continue
+            stored_hash = hashlib.sha256(artifact_content.encode("utf-8")).hexdigest()
+            if current_hash != stored_hash:
+                updated_hashes[artifact_name] = stored_hash
+                changed = True
+        if changed:
+            manifest[digest_map] = updated_hashes
+            sanitized_files[manifest_name] = json.dumps(
+                manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ) + "\n"
+
     root = root.resolve()
     job_dir = (root / job_id).resolve()
     if job_dir.parent != root:
@@ -75,9 +124,7 @@ def _store_agent_artifacts(
         raise ValueError("Invalid job artifact path")
     attempt_dir.mkdir(parents=True, exist_ok=True)
     stored: list[dict[str, object]] = []
-    for name, content in artifact_files.items():
-        if name not in _ALLOWED_ARTIFACT_FILES or Path(name).name != name:
-            raise ValueError("Unsupported Agent artifact name")
+    for name, content in sanitized_files.items():
         encoded = content.encode("utf-8")
         if len(encoded) > max_bytes:
             raise ValueError(f"Agent artifact '{name}' exceeds the configured size limit")
@@ -134,15 +181,21 @@ async def register_agent(
     return cast(
         AgentResponse,
         req.app.state.job_manager.db.upsert_agent(
-            agent_id, payload.name, payload.hostname, payload.capabilities, digest
+            agent_id,
+            payload.capabilities,
+            digest,
+            req.app.state.config.agent_retention_seconds,
         ),
     )
 
 
-@router.get("", response_model=List[AgentResponse])
-async def list_agents(req: Request) -> List[AgentResponse]:
+@router.get("", response_model=List[AgentPresenceResponse])
+async def list_agents(req: Request) -> List[AgentPresenceResponse]:
     req.app.state.job_manager.db.release_stale_claims(req.app.state.config.agent_heartbeat_timeout_seconds)
-    return cast(List[AgentResponse], req.app.state.job_manager.db.list_agents())
+    return cast(
+        List[AgentPresenceResponse],
+        req.app.state.job_manager.db.list_active_agent_presence(req.app.state.config.agent_heartbeat_timeout_seconds),
+    )
 
 
 @router.post("/{agent_id}/heartbeat", response_model=AgentResponse)
@@ -274,6 +327,22 @@ async def complete(
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid Agent artifact: {exc}") from exc
     result = dict(payload.result)
+    agent = manager.db.get_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    reported = agent.capabilities
+    result["executor_provenance"] = {
+        "source": "agent_reported",
+        "os": reported.os,
+        "architecture": reported.architecture,
+        "python_version": reported.python_version,
+        "rocm_detected": reported.rocm_detected,
+        "hip_detected": reported.hip_detected,
+        "pytorch_version": reported.pytorch_version,
+        "amd_gpu_models": reported.gpu_names if reported.amd_gpu_count > 0 else [],
+        "gfx_targets": reported.gfx_targets if reported.amd_gpu_count > 0 else [],
+        "capabilities": reported.capabilities,
+    }
     result["server_artifacts"] = stored
     result["artifacts"] = {str(item["name"]): str(item["sha256"]) for item in stored}
     if stored:
@@ -283,6 +352,7 @@ async def complete(
                 entry = provenance.get(str(item["name"]))
                 if isinstance(entry, dict):
                     entry["stored_sha256"] = item["sha256"]
+                    entry["sanitized"] = entry.get("source_sha256") != item["sha256"]
     if payload.completion_id:
         result["agent_completion_id"] = payload.completion_id
     if not manager.complete_agent_job(

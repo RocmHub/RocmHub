@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from rocmhub.core.errors import (
 from rocmhub.forge.planner import ForgePlanner
 from rocmhub.models.huggingface import HuggingFaceModelSource
 from rocmhub.models.inspector import ModelInspector
+from rocmhub.server.privacy import sanitize_public_value
 from rocmhub.server.security import validate_job_path
 
 router = APIRouter(prefix="/api/v1/forge", tags=["Forge"])
@@ -49,7 +50,7 @@ async def create_forge_plan(request_body: ForgePlanRequest, req: Request) -> Dic
         except SecurityBoundaryError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Security error for output directory: {exc}",
+                detail=f"Security error for output directory: {sanitize_public_value(str(exc))}",
             ) from exc
 
     source = HuggingFaceModelSource()
@@ -65,7 +66,7 @@ async def create_forge_plan(request_body: ForgePlanRequest, req: Request) -> Dic
             output_dir=out_path,
             recipe_id=request_body.recipe,
         )
-        return plan.model_dump(mode="json")
+        return cast(Dict[str, Any], sanitize_public_value(plan.model_dump(mode="json")))
 
     except ModelNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

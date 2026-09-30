@@ -113,10 +113,12 @@ class JobResponse(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     timeout_seconds: int
-    output_dir: Optional[str] = None
+    # Kept for in-process compatibility only; local filesystem locations are never public API data.
+    output_dir: Optional[str] = Field(default=None, exclude=True)
     error_message: Optional[str] = None
     error_code: Optional[str] = None
-    agent_id: Optional[str] = None
+    # Agent IDs are operational ownership keys, not product history.
+    agent_id: Optional[str] = Field(default=None, exclude=True)
     claimed_at: Optional[str] = None
     heartbeat_at: Optional[str] = None
     attempt: int = 0
@@ -152,12 +154,20 @@ class AgentRegisterRequest(BaseModel):
 
 class AgentResponse(BaseModel):
     agent_id: str
-    name: str
-    hostname: str
     status: AgentStatus
     capabilities: AgentCapabilities
     last_seen: str
     created_at: str
+
+
+class AgentPresenceResponse(BaseModel):
+    """Minimal, current compute presence for public product discovery."""
+
+    label: str
+    status: Literal["ONLINE", "BUSY"]
+    has_amd_gpu: bool
+    gpu_names: List[str] = Field(default_factory=list)
+    rocm_detected: bool = False
 
 
 class AgentClaimResponse(BaseModel):
@@ -215,7 +225,8 @@ class JobResultResponse(BaseModel):
     job_type: JobType
     job_status: JobStatus
     domain_status: Optional[str] = None
-    output_dir: Optional[str] = None
+    # Historical/local build paths are not part of public execution evidence.
+    output_dir: Optional[str] = Field(default=None, exclude=True)
     completed_at: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None

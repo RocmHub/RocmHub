@@ -22,7 +22,7 @@ describe('ROCmHub API Client', () => {
       rocm_available: false,
       host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true },
       system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] },
-      orchestrator: { queue_size: 0, active_directory_locks: [] },
+      orchestrator: { queue_size: 0, active_directory_lock_count: 0 },
       warnings: ['No AMD ROCm GPU detected'],
     };
 

@@ -50,23 +50,20 @@ export const JOB_TYPE_COPY: Record<JobType, string> = {
 };
 
 export const AGENT_STATUS_COPY: Record<AgentInfo['status'], string> = {
-  ONLINE: 'Connected',
+  ONLINE: 'Online',
   BUSY: 'Working',
-  OFFLINE: 'Not connected',
-  DEGRADED: 'Connection interrupted',
 };
 
 export function agentSummary(agents: AgentInfo[]): string {
-  const counts = { ONLINE: 0, BUSY: 0, OFFLINE: 0, DEGRADED: 0 };
+  const counts = { ONLINE: 0, BUSY: 0 };
   agents.forEach((agent) => { counts[agent.status] += 1; });
-  return `${counts.ONLINE} connected · ${counts.BUSY} working · ${counts.OFFLINE} not connected · ${counts.DEGRADED} interrupted`;
+  return `${counts.ONLINE} online · ${counts.BUSY} working`;
 }
 
 export function hasConnectedAmdCompute(health: HealthResponse | null, agents: AgentInfo[]): boolean {
   const serviceCompute = health?.status === 'healthy' && health.rocm_available;
   const remoteCompute = agents.some((agent) =>
-    (agent.status === 'ONLINE' || agent.status === 'BUSY') &&
-    agent.capabilities.rocm_detected && agent.capabilities.amd_gpu_count > 0
+    (agent.status === 'ONLINE' || agent.status === 'BUSY') && agent.rocm_detected && agent.has_amd_gpu
   );
   return Boolean(serviceCompute || remoteCompute);
 }

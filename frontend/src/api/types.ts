@@ -34,7 +34,7 @@ export interface HealthResponse {
   };
   orchestrator: {
     queue_size: number;
-    active_directory_locks: string[];
+    active_directory_lock_count: number;
   };
   warnings: string[];
 }
@@ -82,7 +82,6 @@ export interface ForgePlan {
   precision: string;
   recipe_id: string;
   recipe_version: string;
-  output_dir: string;
   estimated_disk_space_bytes: number;
   steps: BuildStepSpec[];
   compatibility_confirmed: boolean;
@@ -99,7 +98,6 @@ export interface JobResponse {
   started_at: string | null;
   completed_at: string | null;
   timeout_seconds: number;
-  output_dir: string | null;
   error_message: string | null;
   error_code: string | null;
 }
@@ -128,7 +126,6 @@ export interface JobResultResponse {
   job_type: JobType;
   job_status: JobStatus;
   domain_status: DomainStatus | null;
-  output_dir: string | null;
   completed_at: string | null;
   result: Record<string, any> | null;
   error_message: string | null;
@@ -156,4 +153,10 @@ export interface JobCreatePayload {
   runtime?: string;
 }
 
-export interface AgentInfo {agent_id:string;name:string;hostname:string;status:'ONLINE'|'BUSY'|'OFFLINE'|'DEGRADED';last_seen:string;capabilities:{rocm_detected:boolean;hip_detected:boolean;amd_gpu_count:number;gpu_names:string[];capabilities:string[]}}
+export interface AgentInfo {
+  label: string;
+  status: 'ONLINE' | 'BUSY';
+  has_amd_gpu: boolean;
+  gpu_names: string[];
+  rocm_detected: boolean;
+}

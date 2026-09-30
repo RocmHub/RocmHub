@@ -163,6 +163,8 @@ class TestHealthAndModelEndpoints:
         assert plan["model_id"] == "Qwen/Qwen2.5-0.5B-Instruct"
         assert plan["revision"] == SAMPLE_COMMIT_SHA
         assert plan["precision"] == "fp16"
+        assert "output_dir" not in plan
+        assert str(workspace) not in resp.text
 
 
 class TestJobLifecycleAndOrchestration:

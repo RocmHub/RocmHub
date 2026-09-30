@@ -23,6 +23,7 @@ from rocmhub.server.orchestrator.models import (
     JobType,
 )
 from rocmhub.server.orchestrator.worker import execute_job
+from rocmhub.server.privacy import sanitize_public_value
 from rocmhub.server.security import validate_job_path
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ class JobManager:
         """Enqueue a new job for background execution."""
         # 1. Validate output directory against allowed workspaces
         output_dir: Optional[str] = None
-        if request.output_dir:
+        if request.output_dir and request.job_type != JobType.PREPARE_MODEL_FOR_AMD:
             validated_path = validate_job_path(request.output_dir, self.config.allowed_workspaces)
             output_dir = str(validated_path)
 
@@ -84,6 +85,10 @@ class JobManager:
         timeout = request.timeout_seconds or self.config.default_job_timeout_seconds
 
         req_dict = request.model_dump(mode="json")
+        if request.job_type == JobType.PREPARE_MODEL_FOR_AMD:
+            # The remote Agent always uses its own managed workspace. Never send a
+            # control-plane filesystem path across the Agent boundary.
+            req_dict["output_dir"] = None
 
         job_resp = self.db.insert_job(
             job_id=job_id,
@@ -141,8 +146,8 @@ class JobManager:
                 job.job_id,
                 "CLAIMED",
                 "RUNNING",
-                f"Claimed by agent {agent_id}",
-                details={"agent_id": agent_id, "attempt": job.attempt},
+                "A connected preparation Agent claimed this job.",
+                details={"attempt": job.attempt},
             )
         return result
 
@@ -190,8 +195,8 @@ class JobManager:
             job_id,
             "COMPLETED",
             "SUCCEEDED",
-            "External agent preparation completed",
-            details={"agent_id": agent_id, "domain_status": domain_status},
+            "Preparation completed by connected compute.",
+            details={"domain_status": domain_status},
         )
         return True
 
@@ -244,8 +249,8 @@ class JobManager:
             domain_status=full_job["domain_status"],
             output_dir=full_job["output_dir"],
             completed_at=full_job["completed_at"],
-            result=full_job.get("result_payload"),
-            error_message=full_job.get("error_message"),
+            result=sanitize_public_value(full_job.get("result_payload")),
+            error_message=sanitize_public_value(full_job.get("error_message")),
         )
 
     def cancel_job(self, job_id: str) -> bool:

@@ -62,4 +62,5 @@ class ServerConfig(BaseModel):
         description="Allowed CORS origins for local web development",
     )
     agent_heartbeat_timeout_seconds: int = Field(default_factory=lambda: int(os.environ.get("ROCMHUB_AGENT_HEARTBEAT_TIMEOUT_SECONDS", "45")), ge=5, le=3600)
+    agent_retention_seconds: int = Field(default_factory=lambda: int(os.environ.get("ROCMHUB_AGENT_RETENTION_SECONDS", "86400")), ge=60, le=31_536_000)
     agent_token_hashes: List[str] = Field(default_factory=lambda: [hashlib.sha256(token.encode()).hexdigest() for token in os.environ.get("ROCMHUB_AGENT_TOKENS", "rocmhub-dev-agent-token").split(",") if token])

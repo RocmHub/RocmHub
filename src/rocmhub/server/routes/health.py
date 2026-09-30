@@ -67,7 +67,9 @@ async def health_check(request: Request) -> Dict[str, Any]:
         },
         "orchestrator": {
             "queue_size": manager._work_queue.qsize() if hasattr(manager, "_work_queue") else 0,
-            "active_directory_locks": list(manager._active_directory_locks) if hasattr(manager, "_active_directory_locks") else [],
+            "active_directory_lock_count": len(manager._active_directory_locks)
+            if hasattr(manager, "_active_directory_locks")
+            else 0,
         },
         "warnings": warnings,
     }

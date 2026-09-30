@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from rocmhub.server.orchestrator.migrations import apply_migrations
 from rocmhub.server.orchestrator.models import (
     AgentCapabilities,
+    AgentPresenceResponse,
     AgentResponse,
     AgentStatus,
     JobEvent,
@@ -19,6 +20,7 @@ from rocmhub.server.orchestrator.models import (
     JobStatus,
     JobType,
 )
+from rocmhub.server.privacy import sanitize_public_value
 
 
 class DatabaseManager:
@@ -49,6 +51,22 @@ class DatabaseManager:
                 conn.close()
 
     @staticmethod
+    def _clear_terminal_local_paths(conn: sqlite3.Connection, job_id: str) -> None:
+        """Keep durable job inputs/evidence while dropping no-longer-needed local paths."""
+        row = conn.execute("SELECT request_payload FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        if not row:
+            return
+        try:
+            request_payload = json.loads(row["request_payload"] or "{}")
+        except (TypeError, ValueError):
+            request_payload = {}
+        safe_request = sanitize_public_value(request_payload)
+        conn.execute(
+            "UPDATE jobs SET output_dir=NULL, request_payload=? WHERE job_id=?",
+            (json.dumps(safe_request), job_id),
+        )
+
+    @staticmethod
     def _job_response(row: sqlite3.Row) -> JobResponse:
         return JobResponse(
             job_id=row["job_id"],
@@ -62,7 +80,7 @@ class DatabaseManager:
             completed_at=row["completed_at"],
             timeout_seconds=row["timeout_seconds"],
             output_dir=row["output_dir"],
-            error_message=row["error_message"],
+            error_message=sanitize_public_value(row["error_message"]),
             error_code=row["error_code"],
             agent_id=row["agent_id"] if "agent_id" in row.keys() else None,
             claimed_at=row["claimed_at"] if "claimed_at" in row.keys() else None,
@@ -195,10 +213,10 @@ class DatabaseManager:
                     params.append(output_dir)
                 if result_payload is not None:
                     updates.append("result_payload = ?")
-                    params.append(json.dumps(result_payload))
+                    params.append(json.dumps(sanitize_public_value(result_payload)))
                 if error_message is not None:
                     updates.append("error_message = ?")
-                    params.append(error_message)
+                    params.append(sanitize_public_value(error_message))
                 if error_code is not None:
                     updates.append("error_code = ?")
                     params.append(error_code)
@@ -209,13 +227,20 @@ class DatabaseManager:
                 params.append(job_id)
                 query = f"UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?"
                 cursor.execute(query, params)
+                if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
+                    self._clear_terminal_local_paths(conn, job_id)
                 conn.commit()
             finally:
                 conn.close()
 
     def upsert_agent(
-        self, agent_id: str, name: str, hostname: str, capabilities: AgentCapabilities, token_hash: str
+        self, agent_id: str, capabilities: AgentCapabilities, token_hash: str, retention_seconds: int
     ) -> AgentResponse:
+        """Persist an opaque operational ID and reported capabilities, not host identity."""
+        self.prune_stale_agents(retention_seconds)
+        has_amd_gpu = capabilities.amd_gpu_count > 0
+        product_name = "AMD Compute Agent" if has_amd_gpu else "Preparation Agent"
+        safe_capabilities = AgentCapabilities.model_validate(sanitize_public_value(capabilities.model_dump()))
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._get_connection()
@@ -225,10 +250,10 @@ class DatabaseManager:
                 VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET name=excluded.name,hostname=excluded.hostname,status='ONLINE',capabilities=excluded.capabilities,token_hash=excluded.token_hash,last_seen=excluded.last_seen""",
                     (
                         agent_id,
-                        name,
-                        hostname,
+                        product_name,
+                        "",
                         AgentStatus.ONLINE.value,
-                        capabilities.model_dump_json(),
+                        safe_capabilities.model_dump_json(),
                         token_hash,
                         now,
                         now,
@@ -237,10 +262,8 @@ class DatabaseManager:
                 conn.commit()
                 return AgentResponse(
                     agent_id=agent_id,
-                    name=name,
-                    hostname=hostname,
                     status=AgentStatus.ONLINE,
-                    capabilities=capabilities,
+                    capabilities=safe_capabilities,
                     last_seen=now,
                     created_at=now,
                 )
@@ -278,8 +301,6 @@ class DatabaseManager:
                 return [
                     AgentResponse(
                         agent_id=r["agent_id"],
-                        name=r["name"],
-                        hostname=r["hostname"],
                         status=AgentStatus(r["status"]),
                         capabilities=AgentCapabilities.model_validate_json(r["capabilities"]),
                         last_seen=r["last_seen"],
@@ -291,14 +312,95 @@ class DatabaseManager:
                 conn.close()
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
-        return next((a for a in self.list_agents() if a.agent_id == agent_id), None)
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+                if not row:
+                    return None
+                return AgentResponse(
+                    agent_id=row["agent_id"],
+                    status=AgentStatus(row["status"]),
+                    capabilities=AgentCapabilities.model_validate_json(row["capabilities"]),
+                    last_seen=row["last_seen"],
+                    created_at=row["created_at"],
+                )
+            finally:
+                conn.close()
+
+    def list_active_agent_presence(self, timeout_seconds: int) -> List[AgentPresenceResponse]:
+        """Return fresh Agent presence without exposing IDs or machine identity."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT a.capabilities,
+                           EXISTS(
+                               SELECT 1 FROM jobs j
+                               WHERE j.agent_id = a.agent_id AND j.status = ?
+                           ) AS is_busy
+                    FROM agents a
+                    WHERE a.last_seen >= ?
+                    ORDER BY a.last_seen DESC
+                    """,
+                    (JobStatus.RUNNING.value, cutoff),
+                ).fetchall()
+                presence: List[AgentPresenceResponse] = []
+                for row in rows:
+                    capabilities = AgentCapabilities.model_validate_json(row["capabilities"])
+                    has_amd_gpu = capabilities.amd_gpu_count > 0
+                    gpu_names = capabilities.gpu_names if has_amd_gpu else []
+                    label = (gpu_names[0] or "AMD Compute Agent") if has_amd_gpu else "Preparation Agent"
+                    presence.append(
+                        AgentPresenceResponse(
+                            label=label,
+                            status="BUSY" if row["is_busy"] else "ONLINE",
+                            has_amd_gpu=has_amd_gpu,
+                            gpu_names=gpu_names,
+                            rocm_detected=capabilities.rocm_detected,
+                        )
+                    )
+                return presence
+            finally:
+                conn.close()
+
+    def prune_stale_agents(self, retention_seconds: int) -> int:
+        """Prune expired presence rows, retaining any Agent that owns a running job."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=retention_seconds)).isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    DELETE FROM agents
+                    WHERE last_seen < ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM jobs j
+                          WHERE j.agent_id = agents.agent_id AND j.status = ?
+                      )
+                    """,
+                    (cutoff, JobStatus.RUNNING.value),
+                )
+                conn.commit()
+                return int(cursor.rowcount)
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def heartbeat_agent(self, agent_id: str) -> bool:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._get_connection()
             try:
-                cur = conn.execute("UPDATE agents SET last_seen=?, status='ONLINE' WHERE agent_id=?", (now, agent_id))
+                cur = conn.execute(
+                    "UPDATE agents SET last_seen=?, status='ONLINE', name='Preparation Agent', hostname='' WHERE agent_id=?",
+                    (now, agent_id),
+                )
                 conn.execute(
                     "UPDATE jobs SET heartbeat_at=? WHERE agent_id=? AND status=?",
                     (now, agent_id, JobStatus.RUNNING.value),
@@ -380,8 +482,11 @@ class DatabaseManager:
                 params: List[Any] = [status.value, completed_at]
                 for column, value in (
                     ("domain_status", domain_status),
-                    ("result_payload", json.dumps(result_payload) if result_payload is not None else None),
-                    ("error_message", error_message),
+                    (
+                        "result_payload",
+                        json.dumps(sanitize_public_value(result_payload)) if result_payload is not None else None,
+                    ),
+                    ("error_message", sanitize_public_value(error_message) if error_message is not None else None),
                     ("error_code", error_code),
                     ("revision", revision),
                 ):
@@ -394,6 +499,12 @@ class DatabaseManager:
                     query += " AND attempt=?"
                     params.append(attempt)
                 cursor = conn.execute(query, params)
+                if cursor.rowcount == 1 and status in {
+                    JobStatus.SUCCEEDED,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                }:
+                    self._clear_terminal_local_paths(conn, job_id)
                 conn.commit()
                 return cursor.rowcount == 1
             finally:
@@ -447,7 +558,9 @@ class DatabaseManager:
                 )
                 seq = cursor.fetchone()[0]
                 timestamp = datetime.now(timezone.utc).isoformat()
-                details_json = json.dumps(details) if details is not None else None
+                safe_message = sanitize_public_value(message)
+                safe_details = sanitize_public_value(details) if details is not None else None
+                details_json = json.dumps(safe_details) if safe_details is not None else None
 
                 cursor.execute(
                     """
@@ -455,7 +568,7 @@ class DatabaseManager:
                         job_id, sequence, timestamp, phase, status, message, error_code, details
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (job_id, seq, timestamp, phase, status, message, error_code, details_json),
+                    (job_id, seq, timestamp, phase, status, safe_message, error_code, details_json),
                 )
                 event_id = cursor.lastrowid
                 conn.commit()
@@ -467,9 +580,9 @@ class DatabaseManager:
                     timestamp=timestamp,
                     phase=phase,
                     status=status,
-                    message=message,
+                    message=safe_message,
                     error_code=error_code,
-                    details=details,
+                    details=safe_details,
                 )
             finally:
                 conn.close()
@@ -491,7 +604,7 @@ class DatabaseManager:
                 )
                 events = []
                 for row in cursor.fetchall():
-                    details = json.loads(row["details"]) if row["details"] else None
+                    details = sanitize_public_value(json.loads(row["details"])) if row["details"] else None
                     events.append(
                         JobEvent(
                             event_id=row["event_id"],
@@ -500,7 +613,7 @@ class DatabaseManager:
                             timestamp=row["timestamp"],
                             phase=row["phase"],
                             status=row["status"],
-                            message=row["message"],
+                            message=sanitize_public_value(row["message"]),
                             error_code=row["error_code"],
                             details=details,
                         )
@@ -553,6 +666,7 @@ class DatabaseManager:
                     else:
                         err_code = "QUEUE_DISCARDED_ON_RESTART"
                         err_msg = f"Job was queued but not started before server restart: {reason}."
+                    err_msg = sanitize_public_value(err_msg)
 
                     cursor.execute(
                         """
@@ -576,6 +690,7 @@ class DatabaseManager:
                         """,
                         (jid, seq, now_iso, "SYSTEM", "FAILED", err_msg, err_code),
                     )
+                    self._clear_terminal_local_paths(conn, str(jid))
 
                 conn.commit()
                 return interrupted_ids

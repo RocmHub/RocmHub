@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from rocmhub.server.app import create_app
 from rocmhub.server.config import ServerConfig
+from rocmhub.server.orchestrator.models import JobStatus
 
 TOKEN = "test-agent-token"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
@@ -257,7 +259,9 @@ def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
         assert done.status_code == 204
         result = client.get(f"/api/v1/jobs/{job_id}/result").json()
         assert result["job_status"] == "SUCCEEDED"
-        assert result["output_dir"] is None
+        assert "output_dir" not in result
+        assert result["result"]["executor_provenance"]["source"] == "agent_reported"
+        assert "agent_id" not in result["result"]["executor_provenance"]
         stored = result["result"]["server_artifacts"]
         assert stored[0]["name"] == "runtime_config.json"
         downloaded = client.get(stored[0]["download_path"])
@@ -266,6 +270,40 @@ def test_agent_completion_persists_artifact_result(tmp_path: object) -> None:
         downloaded_sha = hashlib.sha256(downloaded.content).hexdigest()
         assert stored[0]["sha256"] == downloaded_sha
         assert result["result"]["artifacts"]["runtime_config.json"] == downloaded_sha
+
+
+def test_downloaded_agent_artifacts_do_not_publish_local_identity_or_paths(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        completed = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "CONFIG_ONLY",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "result": {"weights": "NOT_DOWNLOADED", "amd_validated": False},
+                "artifact_files": {
+                    "runtime_config.json": json.dumps(
+                        {
+                            "device": "cpu",
+                            "cache_path": "/Users/private-user/.cache/rocmhub",
+                            "hostname": "mac-mini",
+                        }
+                    )
+                },
+            },
+        )
+        assert completed.status_code == 204
+        result = client.get(f"/api/v1/jobs/{job_id}/result").json()
+        download_path = result["result"]["server_artifacts"][0]["download_path"]
+        downloaded = client.get(download_path)
+        assert downloaded.status_code == 200
+        assert "private-user" not in downloaded.text
+        assert "mac-mini" not in downloaded.text
+        assert "cache_path" not in downloaded.text
 
 
 def test_agent_artifact_sanitization_provenance_and_download_hashes(tmp_path: object) -> None:
@@ -446,3 +484,184 @@ def test_server_restart_releases_remote_ownership_and_mac_rejects_gpu_job(tmp_pa
         client.app.state.job_manager.db.mark_interrupted_jobs_as_failed("test restart")
         # Remote work is released, never silently retained as RUNNING or falsely completed.
         assert client.get(f"/api/v1/jobs/{job_id}").json()["status"] == "QUEUED"
+
+
+def test_agent_discovery_is_current_only_and_does_not_expose_machine_identity(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        registered = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()
+        agent_id = registered["agent_id"]
+        assert "name" not in registered and "hostname" not in registered
+
+        presence = client.get("/api/v1/agents")
+        assert presence.status_code == 200
+        assert presence.json() == [
+            {
+                "label": "Preparation Agent",
+                "status": "ONLINE",
+                "has_amd_gpu": False,
+                "gpu_names": [],
+                "rocm_detected": False,
+            }
+        ]
+        assert "mac-dev-agent" not in presence.text
+        assert "mac-mini" not in presence.text
+        assert agent_id not in presence.text
+
+        conn = client.app.state.job_manager.db._get_connection()
+        try:
+            stored = conn.execute("SELECT name, hostname FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+            assert stored["name"] == "Preparation Agent"
+            assert stored["hostname"] == ""
+            conn.execute("UPDATE agents SET name='mac-dev-agent',hostname='mac-mini' WHERE agent_id=?", (agent_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        assert client.post(f"/api/v1/agents/{agent_id}/heartbeat", headers=HEADERS).status_code == 200
+        conn = client.app.state.job_manager.db._get_connection()
+        try:
+            scrubbed = conn.execute("SELECT name, hostname FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+            assert scrubbed["name"] == "Preparation Agent"
+            assert scrubbed["hostname"] == ""
+            old = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+            conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (old, agent_id))
+            conn.commit()
+        finally:
+            conn.close()
+        assert client.get("/api/v1/agents").json() == []
+
+
+def test_reconnect_prunes_expired_presence_without_removing_active_claims(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        manager = client.app.state.job_manager
+        client.app.state.config.agent_retention_seconds = 60
+        old_agent = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        conn = manager.db._get_connection()
+        try:
+            expired = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+            conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (expired, old_agent))
+            conn.commit()
+        finally:
+            conn.close()
+
+        current_agent = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        assert old_agent != current_agent
+        assert [agent.agent_id for agent in manager.db.list_agents()] == [current_agent]
+        assert len(client.get("/api/v1/agents").json()) == 1
+
+        active_job = create_prepare(client)
+        client.post(f"/api/v1/agents/{current_agent}/claim", headers=HEADERS)
+        conn = manager.db._get_connection()
+        try:
+            expired = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+            conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (expired, current_agent))
+            conn.commit()
+        finally:
+            conn.close()
+        assert manager.db.prune_stale_agents(60) == 0
+        assert manager.db.get_agent(current_agent) is not None
+        assert client.get(f"/api/v1/jobs/{active_job}").json()["status"] == "RUNNING"
+
+
+def test_completed_job_evidence_and_activity_survive_agent_pruning(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        manager = client.app.state.job_manager
+        client.app.state.config.artifact_storage_dir = tmp_path / "agent-artifacts"  # type: ignore[operator]
+        job_id = create_prepare(client)
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        completed = client.post(
+            f"/api/v1/agents/{agent_id}/jobs/{job_id}/complete",
+            headers=HEADERS,
+            json={
+                "domain_status": "CONFIG_ONLY",
+                "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+                "result": {
+                    "weights": "NOT_DOWNLOADED",
+                    "amd_validated": False,
+                    "agent_observation": {"physical_amd_execution": False},
+                },
+            },
+        )
+        assert completed.status_code == 204
+        before = client.get(f"/api/v1/jobs/{job_id}/result").json()
+        assert before["result"]["executor_provenance"]["os"] == "Darwin"
+        assert before["result"]["agent_observation"]["physical_amd_execution"] is False
+        assert "agent_id" not in before
+        assert agent_id not in json.dumps(before)
+
+        conn = manager.db._get_connection()
+        try:
+            expired = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+            conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (expired, agent_id))
+            conn.commit()
+        finally:
+            conn.close()
+        assert manager.db.prune_stale_agents(60) == 1
+
+        after = client.get(f"/api/v1/jobs/{job_id}/result").json()
+        assert after["result"]["executor_provenance"] == before["result"]["executor_provenance"]
+        assert len(manager.db.get_events(job_id)) >= 3
+        assert client.get(f"/api/v1/jobs/{job_id}").json()["status"] == "SUCCEEDED"
+
+
+def test_public_job_and_health_contracts_redact_paths_and_agent_ids(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        manager = client.app.state.job_manager
+        agent_id = client.post("/api/v1/agents/register", headers=HEADERS, json=payload()).json()["agent_id"]
+        client.post(f"/api/v1/agents/{agent_id}/claim", headers=HEADERS)
+        manager.emit_event(
+            job_id,
+            "PRIVACY_TEST",
+            "RUNNING",
+            "Local workspace: /Users/private-user/workspace",
+            details={"output_dir": "/Users/private-user/workspace", "agent_id": agent_id},
+        )
+        manager.db.update_job_status(
+            job_id,
+            status=JobStatus.RUNNING,
+            output_dir="/Users/private-user/workspace",
+            result_payload={
+                "output_dir": "/Users/private-user/workspace",
+                "/Users/private-user/private-manifest.json": "sha256-value",
+                "nested": {"message": "Cache at /home/private-user/.cache/models", "hostname": "developer-mac"},
+                "amd_validated": False,
+            },
+        )
+
+        job = client.get(f"/api/v1/jobs/{job_id}")
+        listing = client.get("/api/v1/jobs?limit=10")
+        result = client.get(f"/api/v1/jobs/{job_id}/result")
+        exposed = "".join((job.text, listing.text, result.text, json.dumps([e.model_dump() for e in manager.db.get_events(job_id)])))
+        assert "output_dir" not in job.json()
+        assert "agent_id" not in job.json()
+        assert "output_dir" not in result.json()
+        assert "private-user" not in exposed
+        assert "/Users/" not in exposed
+        assert "/home/" not in exposed
+        assert "private-manifest.json" not in exposed
+        assert agent_id not in exposed
+
+        manager._active_directory_locks.add("/Users/private-user/workspace")
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["orchestrator"]["active_directory_lock_count"] == 1
+        assert "active_directory_locks" not in health.json()["orchestrator"]
+        assert "/Users/" not in health.text
+
+
+def test_terminal_jobs_do_not_retain_local_filesystem_paths(tmp_path: object) -> None:
+    with make_client(tmp_path) as client:
+        job_id = create_prepare(client)
+        manager = client.app.state.job_manager
+        manager.db.update_job_status(
+            job_id,
+            status=JobStatus.SUCCEEDED,
+            output_dir="/Users/private-user/workspace",
+            result_payload={"output_dir": "/Users/private-user/workspace", "status": "CONFIG_ONLY"},
+        )
+        full_job = manager.db.get_job_full(job_id)
+        assert full_job is not None
+        assert full_job["output_dir"] is None
+        assert "output_dir" not in full_job["request_payload"]
+        assert "output_dir" not in full_job["result_payload"]

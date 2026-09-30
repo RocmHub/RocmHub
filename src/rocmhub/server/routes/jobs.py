@@ -20,6 +20,7 @@ from rocmhub.server.orchestrator.models import (
     JobStatus,
     JobType,
 )
+from rocmhub.server.privacy import sanitize_public_value
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
 
@@ -50,7 +51,7 @@ async def create_job(request_body: JobCreateRequest, req: Request) -> JobRespons
     except SecurityBoundaryError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Security boundary violation: {exc}",
+            detail=f"Security boundary violation: {sanitize_public_value(str(exc))}",
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(

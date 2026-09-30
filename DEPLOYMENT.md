@@ -11,6 +11,7 @@ ROCMHUB_DATA_DIR=/data
 ROCMHUB_CORS_ORIGINS=https://<your-pages-project>.pages.dev
 ROCMHUB_AGENT_TOKENS=<one-or-more-long-random-agent-tokens-separated-by-commas>
 ROCMHUB_AGENT_HEARTBEAT_TIMEOUT_SECONDS=45
+ROCMHUB_AGENT_RETENTION_SECONDS=86400
 ```
 
 Railway supplies `PORT`; the image runs `rocmhub serve --host 0.0.0.0` and reads that value. The persistent directory contains `jobs.db` (SQLite WAL state) and `agent-artifacts/` (only the allowlisted, UTF-8 configuration, manifest, checksum, and launcher outputs). Do not set `ROCMHUB_DB_PATH` outside `/data` unless you provide an equivalent persistent mount.
@@ -64,6 +65,16 @@ The script requires `ROCMHUB_AGENT_TOKEN` (or `--token`), performs health, regis
 ## Operations and recovery
 
 - Back up the Railway `/data` Volume before destructive service changes; SQLite and retained small artifacts survive container restarts through that Volume.
-- A restarted backend releases a stale claimed preparation job rather than claiming it completed. A reconnecting Agent re-registers with its stable server identity header and resumes heartbeats.
+- Agent presence is operational state, not history. Public discovery includes only Agents with a fresh heartbeat; stale presence is hidden after `ROCMHUB_AGENT_HEARTBEAT_TIMEOUT_SECONDS` (45 seconds by default). Rows older than `ROCMHUB_AGENT_RETENTION_SECONDS` (24 hours by default) are pruned during a later Agent registration or the bounded maintenance command. Agent-provided names and hostnames are not persisted or returned by public discovery.
+- A restarted backend releases a stale claimed preparation job rather than claiming it completed. Each Agent process registers an opaque server-side ID; a new process may receive a new ID, and old presence is bounded by retention. Completed job evidence is stored separately from machine identity.
 - Rotate Agent credentials by changing `ROCMHUB_AGENT_TOKENS`, restarting the service, then updating Agents. An Agent can also revoke its currently used token at `/api/v1/agents/revoke`.
 - Keep the Railway URL and explicit CORS origin aligned with the Pages production/custom-domain URL. Browser requests use HTTPS; the Agent uses outbound HTTPS to the same API.
+
+For the one-time pre-public cleanup, run the command inside the configured Railway service so it targets the attached `/data` volume:
+
+```bash
+rocmhub maintenance clean-development-data --dry-run
+rocmhub maintenance clean-development-data --confirm
+```
+
+The default is read-only. Confirmation creates a SQLite backup beside the configured database, then removes only stale Agent presence and records positively identified as development/test jobs, including their events and server artifacts. The command stops without deleting data if a job is ambiguous, active, contains physical AMD execution evidence, or has an unsafe artifact path. It is not exposed as an HTTP endpoint.

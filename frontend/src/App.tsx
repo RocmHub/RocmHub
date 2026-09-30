@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAgents, fetchHealth, fetchJobs } from './api/client';
 import { Navbar } from './components/layout/Navbar';
-import { Sidebar, type NavTab } from './components/layout/Sidebar';
+import type { NavTab } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ModelExplorerView } from './components/explorer/ModelExplorerView';
 import { ForgeStudioView } from './components/forge/ForgeStudioView';
@@ -12,7 +12,6 @@ import { RunsView } from './components/runs/RunsView';
 import { ToastProvider } from './components/common/Toast';
 import { resolveInitialTab } from './ui/navigation';
 import { hasConnectedAmdCompute } from './ui/presentation';
-import { readThemePreference, resolveTheme, persistThemePreference, type ThemePreference } from './ui/theme';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'explorer', 'runs', 'forge', 'engineer', 'optimization'];
 
@@ -27,8 +26,8 @@ function getInitialJobId(): string | null {
 }
 
 export const App: React.FC = () => {
-  const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
+  const mainScrollRef = useRef<HTMLElement>(null);
   const [selectedModelForForge, setSelectedModelForForge] = useState({
     modelId: 'Qwen/Qwen2.5-0.5B-Instruct',
     revision: 'main',
@@ -60,17 +59,8 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: light)');
-    const applyTheme = () => {
-      const resolved = resolveTheme(theme, media.matches);
-      document.documentElement.dataset.theme = resolved;
-      document.documentElement.style.colorScheme = resolved;
-    };
-    applyTheme();
-    if (theme === 'system') media.addEventListener('change', applyTheme);
-    persistThemePreference(theme);
-    return () => media.removeEventListener('change', applyTheme);
-  }, [theme]);
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [activeTab, selectedJobId]);
 
   const {
     data: health,
@@ -120,6 +110,8 @@ export const App: React.FC = () => {
     <ToastProvider>
       <div className="h-screen app-surface text-content-primary flex flex-col overflow-hidden">
         <Navbar
+          activeTab={activeTab}
+          onTabChange={switchTab}
           health={health ?? null}
           isLoading={isLoadingHealth}
           isError={isHealthError}
@@ -127,11 +119,8 @@ export const App: React.FC = () => {
           isLoadingAgents={isLoadingAgents}
           isAgentsError={isAgentsError}
           onRetryAgents={() => { void refetchAgents(); }}
-          theme={theme}
-          onThemeChange={setTheme}
         />
-        <div className="nav-rail"><Sidebar activeTab={activeTab} onTabChange={switchTab}/></div>
-        <main className="flex-1 overflow-y-auto">
+        <main ref={mainScrollRef} className="flex-1 overflow-y-auto">
             {activeTab === 'dashboard' && (
               <DashboardView
                 health={health ?? null}

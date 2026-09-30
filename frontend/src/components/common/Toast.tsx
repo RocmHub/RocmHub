@@ -26,10 +26,10 @@ export const useToast = (): ToastContextValue => {
 
 const ICONS = { success: CheckCircle2, error: XCircle, warning: AlertTriangle, info: Info };
 const COLORS = {
-  success: { bg: 'bg-emerald-900/90 border-emerald-600/40', icon: 'text-emerald-400', text: 'text-emerald-50' },
-  error:   { bg: 'bg-red-950/90 border-red-600/40',     icon: 'text-red-400',     text: 'text-red-50'     },
-  warning: { bg: 'bg-amber-950/90 border-amber-600/40', icon: 'text-amber-400',   text: 'text-amber-50'   },
-  info:    { bg: 'bg-zinc-900/90 border-zinc-600/40',   icon: 'text-zinc-300',    text: 'text-zinc-50'    },
+  success: { bg: 'bg-emerald-50 border-emerald-200', icon: 'text-emerald-700', text: 'text-emerald-900' },
+  error:   { bg: 'bg-red-50 border-red-200', icon: 'text-red-700', text: 'text-red-900' },
+  warning: { bg: 'bg-amber-50 border-amber-200', icon: 'text-amber-700', text: 'text-amber-900' },
+  info:    { bg: 'bg-zinc-50 border-zinc-200', icon: 'text-zinc-700', text: 'text-zinc-900' },
 };
 
 const DURATIONS: Record<ToastType, number> = { success: 4000, error: 7000, warning: 5000, info: 4000 };

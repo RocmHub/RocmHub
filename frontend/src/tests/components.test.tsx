@@ -144,11 +144,9 @@ describe('Common Components', () => {
       system: { os: 'darwin', python_version: '3.9.6', rocm_version: '6.2', torch_version: '2.2.0', gpus_detected: 0, gpus: [] },
       orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [],
     };
-    const onThemeChange = vi.fn();
-    render(<Navbar health={health} isLoading={false} isError={false} theme="system" onThemeChange={onThemeChange} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Color theme' }), { target: { value: 'light' } });
-    expect(onThemeChange).toHaveBeenCalledWith('light');
-    expect(screen.getByRole('option', { name: 'System' })).toBeInTheDocument();
+    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} />);
+    expect(screen.queryByRole('combobox', { name: 'Color theme' })).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
     expect(screen.getByText(/No AMD runtime detected here/)).toBeInTheDocument();
@@ -165,7 +163,7 @@ describe('Common Components', () => {
     expect(screen.getAllByLabelText('Advanced revision')[0]).toHaveValue('main');
     expect(screen.queryByText('Production class')).not.toBeInTheDocument();
     expect(screen.getAllByText('Larger instruction model').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Select one, then choose Inspect/)).toBeInTheDocument();
+    expect(screen.getByText(/Choose a starting point or paste any public/)).toBeInTheDocument();
   });
 
   it('explains that Optimize currently prepares configuration comparisons, even when AMD is detected', () => {
@@ -191,7 +189,7 @@ describe('Common Components', () => {
 
   it('uses the user-facing Forge stage labels', () => {
     render(<ToastProvider><ForgeStudioView /></ToastProvider>);
-    for (const label of ['Model', 'Hardware', 'Profile', 'Review', 'Build', 'Result']) {
+    for (const label of ['Model', 'Target', 'Profile', 'Review', 'Build', 'Output']) {
       expect(screen.getByText(label, { exact: true })).toBeInTheDocument();
     }
     expect(screen.getByText(/immutable revision before preparation/)).toBeInTheDocument();
@@ -327,7 +325,7 @@ describe('Common Components', () => {
   it('never presents offline agents as connected in the compute panel', () => {
     const health: HealthResponse = { status: 'healthy', version: '0.1.0', rocm_available: false, host_platform: { os: 'darwin', arch: 'arm64', python_version: '3.9.6', is_apple_silicon: true }, system: { os: 'darwin', python_version: '3.9.6', rocm_version: null, torch_version: '2.2.0', gpus_detected: 0, gpus: [] }, orchestrator: { queue_size: 0, active_directory_locks: [] }, warnings: [] };
     const offline = [{ agent_id: 'offline', name: 'Offline', hostname: 'laptop', status: 'OFFLINE' as const, last_seen: '2026-09-01T00:00:00Z', capabilities: { rocm_detected: true, hip_detected: true, amd_gpu_count: 1, gpu_names: ['AMD GPU'], capabilities: ['PREPARE_MODEL_FOR_AMD'] } }];
-    render(<Navbar health={health} isLoading={false} isError={false} agents={offline} theme="system" onThemeChange={vi.fn()} />);
+    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={health} isLoading={false} isError={false} agents={offline} />);
     expect(screen.getByRole('button', { name: 'No AMD compute' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'No AMD compute' }));
     expect(screen.getByText('AMD GPU')).toBeInTheDocument();
@@ -335,9 +333,9 @@ describe('Common Components', () => {
     expect(screen.queryByText('AMD compute available')).not.toBeInTheDocument();
   });
 
-  it('labels compute status as unknown when the service cannot be reached', () => {
-    render(<Navbar health={null} isLoading={false} isError agents={[]} theme="system" onThemeChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Compute status unknown' }));
+  it('labels compute status as unavailable when the service cannot be reached', () => {
+    render(<Navbar activeTab="dashboard" onTabChange={vi.fn()} health={null} isLoading={false} isError agents={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Compute status unavailable' }));
     expect(screen.getByText(/Connection status could not be confirmed/)).toBeInTheDocument();
   });
 

@@ -8,6 +8,7 @@ import { DOMAIN_STATUS_COPY, jobProgressCopy } from '../../ui/presentation';
 import { resultLabel } from '../../ui/presentation';
 import { LogViewer } from '../common/LogViewer';
 import { useToast } from '../common/Toast';
+import comparisonVisual from '../../assets/visuals/rocmhub-comparison-preparation.jpg';
 import {
   Play, XCircle, CheckCircle2, BarChart3, Info, Check, ChevronDown,
 } from 'lucide-react';
@@ -166,9 +167,9 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
         },
       });
     } catch (err: any) {
-      const message = `Optimization failed: ${err.message}`;
+      const message = err?.message || 'Unable to prepare this comparison.';
       setLaunchError(message);
-      toast.error(message);
+      toast.error('We couldn’t prepare the comparison. Your selections are unchanged.');
     } finally {
       setIsStarting(false);
     }
@@ -187,8 +188,8 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
       }
       if (job.status === 'CANCELLED') setLaunchError('The experiment was cancelled. The study design is preserved for retry.');
       else if (job.status !== 'SUCCEEDED') toast.info('Cancellation requested. The job is still being reconciled.');
-    } catch (e: any) {
-      toast.error(`Cancel failed: ${e.message}`);
+    } catch {
+      toast.error('The experiment could not be cancelled. Check Activity or retry.');
     }
   };
 
@@ -204,7 +205,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
   return (
     <div className="page-fade optimize-page">
       <div className="page-shell py-8 md:py-10 space-y-6">
-        <header className="optimize-heading"><div><div className="eyebrow">Compare configurations</div><h1>Optimize</h1><p>Choose a model, an optimization goal and candidate precisions.</p></div><span className="optimize-state">Preparation only · no measurements yet</span></header>
+        <header className="optimize-heading"><div className="optimize-heading-copy"><div className="eyebrow">Configuration comparison</div><h1>Optimize</h1><p>Prepare a baseline and candidate configurations. Hardware performance is only shown after a real AMD run.</p><span className="optimize-state">Preparation only · performance not measured</span></div><figure className="optimize-visual" aria-hidden="true"><img src={comparisonVisual} alt="" loading="lazy"/></figure></header>
         {/* ── WORKSPACE SETUP ─────────────────────────────────────── */}
           <div className="focus-panel p-5 md:p-8 space-y-7">
           <div role="note" aria-label="Hardware measurement availability" className="rounded-xl border border-amber-500/20 bg-amber-500/[.05] p-4 md:p-5">
@@ -293,7 +294,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
         {launchError && !jobResult && (
           <div className="p-5 rounded-2xl bg-red-500/[.07] border border-red-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex gap-3"><Info className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">Experiment needs attention</div><p className="text-xs text-red-300/70 mt-1">{launchError}</p></div></div>
+            <div className="flex gap-3"><Info className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">Comparison couldn’t be prepared</div><p className="text-sm text-zinc-500 mt-1">Your selections are unchanged. Retry when the service is available.</p><details className="technical-details"><summary>Technical details</summary><p>{friendlyError(launchError)}</p></details></div></div>
             <button onClick={handleLaunch} disabled={!modelId.trim()} className="btn-secondary shrink-0">Retry experiment</button>
           </div>
         )}
@@ -301,7 +302,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
         {/* ── ACTIVE JOB ──────────────────────────────────────────── */}
         {activeJob && (
           <div className="card p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="comparison-record-header flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold text-content-primary">{isRunning ? 'Experiment running' : 'Experiment record'}</h3>
                 <StatusBadge status={activeJob.status} />
@@ -333,7 +334,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
 
             {/* Results */}
             {jobResult && (
-              <div className="space-y-4 pt-2 border-t border-surface-border">
+              <div className="comparison-result space-y-4 pt-2 border-t border-surface-border">
                 {/* Completion + hardware notice */}
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2">
@@ -353,7 +354,7 @@ export const OptimizationLabView: React.FC<OptimizationLabViewProps> = ({ select
                 </div>
 
                 {(failed || cancelled) && (
-                  <div className="p-6 rounded-2xl bg-amber-500/[.06] border border-amber-500/20 flex flex-col md:flex-row md:items-center justify-between gap-5"><div><div className="text-lg font-semibold">{cancelled?'Experiment cancelled':'No comparison was produced'}</div><p className="text-sm text-zinc-500 mt-2 max-w-2xl leading-relaxed">{friendlyError(failureDetail)}</p>{friendlyError(failureDetail)!==failureDetail&&<details className="mt-3"><summary className="text-[11px] text-zinc-500 cursor-pointer">Technical details</summary><p className="mt-2 max-w-2xl font-mono text-[10px] text-zinc-600 break-all">{failureDetail}</p></details>}</div><button onClick={handleLaunch} className="btn-secondary shrink-0">Retry experiment</button></div>
+                  <div className="p-6 rounded-2xl bg-amber-500/[.06] border border-amber-500/20 flex flex-col md:flex-row md:items-center justify-between gap-5"><div><div className="text-lg font-semibold">{cancelled?'Experiment cancelled':'No comparison was produced'}</div><p className="text-sm text-zinc-500 mt-2 max-w-2xl leading-relaxed">{cancelled?'The operation stopped safely. Your selections are preserved and no comparison metrics were recorded.':'We couldn’t complete the comparison. Your model and settings are preserved; no results or performance measurements were produced.'}</p><details className="technical-details mt-3"><summary>Technical details</summary><p className="max-w-2xl font-mono text-xs break-all">{failureDetail}</p></details></div><button onClick={handleLaunch} className="btn-secondary shrink-0">Retry experiment</button></div>
                 )}
 
                 {/* Hardware truth notice — prominent */}

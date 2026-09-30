@@ -2,15 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { AgentInfo, HealthResponse } from '../../api/types';
 import { Activity, ChevronDown } from 'lucide-react';
 import { AGENT_STATUS_COPY, hasConnectedAmdCompute } from '../../ui/presentation';
+import { Sidebar, type NavTab } from './Sidebar';
 
 interface NavbarProps {
+  activeTab: NavTab; onTabChange: (tab: NavTab) => void;
   health: HealthResponse | null; isLoading: boolean; isError: boolean; agents?: AgentInfo[];
   isLoadingAgents?: boolean; isAgentsError?: boolean; onRetryAgents?: () => void;
-  isMobileMenuOpen?: boolean; onToggleMobileMenu?: () => void;
-  theme: 'system' | 'light' | 'dark'; onThemeChange: (theme: 'system' | 'light' | 'dark') => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, agents = [], isLoadingAgents = false, isAgentsError = false, onRetryAgents, theme, onThemeChange }) => {
+export const Navbar: React.FC<NavbarProps> = ({ activeTab, onTabChange, health, isLoading, isError, agents = [], isLoadingAgents = false, isAgentsError = false, onRetryAgents }) => {
   const [open, setOpen] = useState(false);
   const computeButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -43,13 +43,14 @@ export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, agen
   const connected = hasConnectedAmdCompute(health, agents);
   const checking = isLoading || isLoadingAgents;
   const unknown = !checking && (isError || isAgentsError || !health);
-  const label = checking ? 'Checking compute' : connected ? 'AMD compute connected' : unknown ? 'Compute status unknown' : 'No AMD compute';
+  const label = checking ? 'Checking compute' : connected ? 'AMD compute connected' : unknown ? 'Compute status unavailable' : 'No AMD compute';
   return <header className="product-header">
-    <a className="brand-lockup" href="#dashboard" aria-label="ROCmHub home" onClick={() => window.dispatchEvent(new HashChangeEvent('hashchange'))}>
-      <span className="brand-symbol" aria-hidden="true"><i/><i/></span><span className="brand-name">ROCmHub</span>
-    </a>
-    <div className="header-end">
-      <label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={theme} onChange={event => onThemeChange(event.target.value as 'system' | 'light' | 'dark')}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <div className="product-header-inner">
+      <a className="brand-lockup" href="#dashboard" aria-label="ROCmHub home" onClick={() => window.dispatchEvent(new HashChangeEvent('hashchange'))}>
+        <span className="brand-symbol" aria-hidden="true"><i/><i/></span><span className="brand-name">ROCmHub</span>
+      </a>
+      <div className="header-nav"><Sidebar activeTab={activeTab} onTabChange={onTabChange}/></div>
+      <div className="header-end">
       <div className="relative">
         <button ref={computeButtonRef} aria-controls="compute-panel" aria-haspopup="dialog" aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)} className="compute-indicator">
           <span className={`compute-mark ${connected ? 'compute-mark-on' : isLoading || isLoadingAgents ? 'compute-mark-wait' : ''}`}/><span>{label}</span><ChevronDown size={13}/>
@@ -68,6 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({ health, isLoading, isError, agen
             <details className="technical-details service-technical"><summary><Activity size={13}/> Service details</summary><p>{isError ? 'Service status unavailable' : `Service ${health?.status || 'checking'} · ${health?.host_platform.os || 'unknown'} · ROCm ${health?.system.rocm_version || 'not detected'} · PyTorch ${health?.system.torch_version || 'not detected'}`}</p></details>
           </aside>
         </>}
+      </div>
       </div>
     </div>
   </header>;

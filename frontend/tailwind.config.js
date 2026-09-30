@@ -7,26 +7,26 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0D0D11',
+        background: '#FFFFFF',
         surface: {
-          DEFAULT: '#16161C',
-          elevated: '#1E1E26',
-          card: '#1A1A22',
-          deep: '#111116',
-          border: '#2A2A35',
+          DEFAULT: '#FFFFFF',
+          elevated: '#F7F7F7',
+          card: '#FFFFFF',
+          deep: '#FAFAFA',
+          border: '#E2E2E2',
         },
         accent: {
-          red: '#ED1C24',
-          'red-hover': '#D0171E',
-          'red-muted': 'rgba(237, 28, 36, 0.12)',
-          'red-glow': 'rgba(237, 28, 36, 0.20)',
+          red: '#D51F2E',
+          'red-hover': '#B71C2A',
+          'red-muted': 'rgba(213, 31, 46, 0.10)',
+          'red-glow': 'rgba(213, 31, 46, 0.12)',
           subtle: 'rgba(237, 28, 36, 0.06)',
         },
         content: {
-          primary: '#F2F2F5',
-          secondary: '#9898A8',
-          muted: '#60606E',
-          inverse: '#0D0D11',
+          primary: '#111111',
+          secondary: '#4F4F4F',
+          muted: '#6D6D6D',
+          inverse: '#FFFFFF',
         },
         status: {
           success: '#10B981',

@@ -106,7 +106,7 @@ export function activityOutcomeCopy(
     return { title: job.job_type === 'PREPARE_MODEL_FOR_AMD' ? 'Preparing model' : 'In progress', description: 'Work is underway. No completion time is estimated.' };
   }
   if (job.status === 'FAILED') {
-    return { title: 'Needs attention', description: job.error_message || 'This work did not complete. Open the result for details or retry.' };
+    return { title: 'Needs attention', description: 'This work did not complete. Open the result for technical details or retry.' };
   }
   if (job.status === 'CANCELLED') {
     return { title: 'Cancelled', description: 'This work stopped before completion. Its result can be reviewed in Activity.' };

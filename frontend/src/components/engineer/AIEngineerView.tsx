@@ -177,9 +177,9 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         },
       });
     } catch (err: any) {
-      const message = `Session launch failed: ${err.message}`;
+      const message = err?.message || 'Unable to start this session.';
       setLaunchError(message);
-      toast.error(message);
+      toast.error('The session couldn’t start. Your model and selected outcome are unchanged.');
     } finally {
       setIsStarting(false);
     }
@@ -198,8 +198,8 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
       }
       if (job.status === 'CANCELLED') setLaunchError('The session was cancelled. Your objective and model are preserved for retry.');
       else if (job.status !== 'SUCCEEDED') toast.info('Cancellation requested. The job is still being reconciled.');
-    } catch (e: any) {
-      toast.error(`Cancel failed: ${e.message}`);
+    } catch {
+      toast.error('The session could not be cancelled. Check Activity or retry.');
     }
   };
 
@@ -209,7 +209,6 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
   const selectedObj = OBJECTIVES.find(o => o.id === objective);
   const latestActivity = jobEvents.at(-1);
   const rawFailure = String(jobResult?.error_message || jobResult?.result?.errors_encountered?.[0] || jobResult?.result?.reasons?.[0] || launchError || 'The engineer stopped before producing a verified recommendation.');
-  const failureMessage = rawFailure.includes('MODEL_NOT_FOUND') ? 'The model could not be resolved. Check repository access and the model ID, then retry.' : rawFailure;
 
   return (
     <div className="page-fade engineer-page">
@@ -249,7 +248,8 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         </div>
 
         {/* ── MODEL + LAUNCH ──────────────────────────────────────── */}
-        <div className="focus-panel p-6 md:p-8 space-y-5">
+        <div className="focus-panel engineer-request p-6 md:p-8 space-y-5">
+          <div className="engineer-selected-outcome" aria-live="polite"><span className="eyebrow">Selected outcome</span><strong>{selectedObj?.label || 'Prepare this model'}</strong><p>{selectedObj?.desc}</p></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-content-muted">Public Hugging Face model ID</label>
@@ -257,7 +257,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                 type="text"
                 value={modelId}
                 onChange={(e) => { setModelId(e.target.value); setLaunchError(null); setActiveJob(null); setJobResult(null); setJobEvents([]); }}
-                className="input-field font-mono text-xs"
+                className="input-field font-mono text-sm"
                 placeholder="org/model-name"
               />
             </div>
@@ -320,7 +320,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
         {launchError && !jobResult && (
           <div className="p-5 rounded-2xl bg-red-500/[.07] border border-red-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex gap-3"><AlertCircle className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">Engineer needs your attention</div><p className="text-xs text-red-300/70 mt-1">{launchError}</p></div></div>
+            <div className="flex gap-3"><AlertCircle className="w-5 h-5 text-red-400 shrink-0"/><div><div className="text-sm font-semibold text-red-200">The session couldn’t start</div><p className="text-sm text-zinc-500 mt-1">Your model and selected outcome are unchanged. You can retry or adjust the request.</p><details className="technical-details"><summary>Technical details</summary><p>{launchError}</p></details></div></div>
             <button onClick={handleLaunch} disabled={!modelId.trim()} className="btn-secondary shrink-0"><RotateCcw className="w-3.5 h-3.5"/>Retry session</button>
           </div>
         )}
@@ -329,13 +329,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
         {activeJob && (
           <div className="flex flex-col gap-4">
             {isRunning && !jobResult && (
-              <div className="focus-panel p-6 md:p-8 order-1" aria-label="Engineer activity">
+              <div className="focus-panel engineer-progress p-6 md:p-8 order-1" aria-label="Engineer activity">
                 <div className="flex items-center justify-between gap-4"><div><div className="eyebrow mb-2">Progress</div><h3 className="text-xl font-semibold">Preparing your recommendation</h3></div><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"/></div>
-                <div className="mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{activeJob.status === 'QUEUED' ? 'Waiting for compatible compute. Your request is saved.' : latestActivity ? `${jobProgressCopy(latestActivity.status, latestActivity.phase)} your request.` : 'Your request is in progress. Checking for the first update.'}</span></div><p className="text-sm text-zinc-600 mt-2">Live updates may pause temporarily; the same request is reconciled. No completion percentage is estimated.</p></div>
+                <div className="engineer-live-status mt-6 rounded-xl border hairline bg-white/[.02] p-4" role="status"><div className="flex items-center gap-3"><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-sm text-zinc-200">{activeJob.status === 'QUEUED' ? 'Waiting for compatible compute. Your request is saved.' : latestActivity ? `${jobProgressCopy(latestActivity.status, latestActivity.phase)} your request.` : 'Your request is in progress. Checking for the first update.'}</span></div><p className="text-sm text-zinc-600 mt-2">Live updates may pause temporarily; the same request is reconciled. No completion percentage is estimated.</p></div>
               </div>
             )}
             {/* Session header */}
-            <div className="card p-5 order-2">
+            <div className="card engineer-session p-5 order-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-content-primary">{isRunning ? 'Engineer at work' : 'Session record'}</h3>
@@ -396,13 +396,13 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
             {/* ── RESULT ──────────────────────────────────────────── */}
             {jobResult && (failed || cancelled) && (
-              <div className="focus-panel p-6 md:p-8 space-y-5 order-1">
-                <div className="flex items-start gap-4"><div className="w-11 h-11 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0"><AlertCircle className="w-5 h-5"/></div><div><div className="eyebrow mb-2">Recommendation unavailable</div><h3 className="text-xl font-semibold">{cancelled ? 'Session cancelled' : 'We couldn’t complete this session'}</h3><p className="text-sm text-zinc-500 mt-2 leading-relaxed">{failureMessage}</p>{rawFailure!==failureMessage&&<details className="mt-3"><summary className="text-xs text-zinc-600 cursor-pointer">Technical details</summary><p className="font-mono text-[10px] text-zinc-600 mt-2 break-all">{rawFailure}</p></details>}</div></div>
+              <div className="focus-panel engineer-executive-result p-6 md:p-8 space-y-5 order-1">
+                <div className="flex items-start gap-4"><div className="w-11 h-11 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0"><AlertCircle className="w-5 h-5"/></div><div><div className="eyebrow mb-2">Recommendation unavailable</div><h3 className="text-xl font-semibold">{cancelled ? 'Session cancelled' : 'We couldn’t complete this session'}</h3><p className="text-sm text-zinc-500 mt-2 leading-relaxed">The session ended before a recommendation was recorded. Your model and selected outcome are preserved for retry.</p><details className="technical-details mt-3"><summary>Technical details</summary><p>{rawFailure}</p></details></div></div>
                 <div className="flex flex-wrap justify-end gap-2 border-t hairline pt-5"><button onClick={()=>{setActiveJob(null);setJobResult(null);setJobEvents([]);setLaunchError(null)}} className="btn-ghost">Edit objective</button><button onClick={handleLaunch} className="btn-primary"><RotateCcw className="w-3.5 h-3.5"/>Retry session</button></div>
               </div>
             )}
             {jobResult && !failed && !cancelled && (
-              <div className="card p-5 space-y-4 order-1">
+              <div className="card engineer-executive-result p-5 space-y-4 order-1">
                 {/* Completion header */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-surface-border">
                   <div className="flex items-center gap-2">
@@ -416,7 +416,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                   </span>
                 </div>
 
-                <div className="p-4 border-l-2 border-red-500/50 bg-surface-elevated">
+                  <div className="engineer-result-summary p-5 border-l-2 border-red-500/50 bg-surface-elevated">
                   <div className="text-sm font-semibold text-content-primary">{selectedObj?.label || 'Guidance'}</div>
                   <p className="text-sm text-content-secondary mt-1">Review the guidance below. A recommendation does not itself run, validate, or measure the model.</p>
                   {jobResult.domain_status && <div className="text-sm text-content-secondary mt-3">{domainStatusLabel(jobResult.domain_status)} · {DOMAIN_STATUS_COPY[jobResult.domain_status].explanation}</div>}
@@ -440,12 +440,9 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
 
                 {/* Errors */}
                 {jobResult.result?.errors_encountered && Array.isArray(jobResult.result.errors_encountered) && jobResult.result.errors_encountered.length > 0 && (
-                  <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/20 space-y-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      Details to review
-                    </div>
-                    <ul className="space-y-1 text-xs text-amber-300/80">
+                  <details className="technical-details">
+                    <summary><span className="inline-flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5"/>Technical details · {jobResult.result.errors_encountered.length}</span></summary>
+                    <ul className="mt-3 space-y-1 text-xs text-content-secondary">
                       {jobResult.result.errors_encountered.map((err: string, idx: number) => (
                         <li key={idx} className="flex items-start gap-2">
                           <span className="shrink-0 mt-0.5">•</span>
@@ -453,7 +450,7 @@ export const AIEngineerView: React.FC<AIEngineerViewProps> = ({ selectedJobId, o
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </details>
                 )}
 
                 {/* Trajectory — collapsed by default */}
